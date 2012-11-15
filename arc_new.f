@@ -382,7 +382,8 @@ C     + 2880,2850,2910,2880) NNN
       J1 = J + 1
       NN = 2
       ELSEIF (NNN.EQ.2) THEN
-      GOTO 3320
+      J1 = J + 1
+      NN = 2
       ELSEIF (NNN.EQ.3) THEN
       J1 = J + 1
       NN = 1
@@ -417,22 +418,31 @@ C     + 2880,2850,2910,2880) NNN
       J1 = J - 1
       NN = 1
       END IF
+
+      GO TO 2890
+
        
-       GO TO 2930
+       
  2880  J1 = J - 1
        NN = 1
 
+ 2890  IF(J1.LE.0) THEN
+            GOTO 3290
+       ENDIF
+       IF(J1.GT.NC) THEN
+            GOTO 3290
+       ENDIF
 *       routines for diagonally partitioned cells - GONE
-       
+
  2930  KKD1 = NOD(I, J1) / 1000
  2950  KD = KKD
  3120  KD1 = KKD1
  3280  CT = T(I, J1) - T(I, J)
        AD = X(J1) / D(KD1) + X(J) / D(KD)
        XB = XB + 2 * CT / (AD * X(J))
-       GO TO (3340,2880) NN      
+ 3290  GO TO (3340,2880) NN      
  3320  W(I, J) = T(I, J)
- 3340  GO TO(3360,3750,3360,3360,3420,3390,3420,3420,3390,3390,3390,
+ 3340  GO TO(3360,3420,3360,3360,3420,3390,3420,3420,3390,3390,3390,
      + 3390,3390)NNN
  3360  I1 = I + 1
        NN = 2

@@ -101,7 +101,8 @@ REAL time_step;                 //The amount of time that passes between each up
 REAL run_time;                  //The run time of the simulation
 
 //Global variables
-int save_result;                //Indicates if the model should save the current state at each screen update
+int save_state;                 //Indicates if the model should save the current state at each screen update
+int save_result;                //Indicates if the model should save the final result of the simulaiton
 REAL max_vel;                   //The maximum convection velocity of the velocity array
 REAL min_row_dim;               //The minimum y dimension of each cell of the simulation
 REAL min_col_dim;               //The minimum x dimension of each cell of the simulation
@@ -150,14 +151,24 @@ void load_file() {
     
     //Asks the user if the state of the model should be saved every screen update
     cout << endl << "To save the state of the model every screen update enter 1, otherwise 0: ";
-    cin >> save_result;
-    while(save_result < 0 || save_result > 1) {
+    cin >> save_state;
+    while(save_state < 0 || save_state > 1) {
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
+        cin >> save_state;
+    }
+    
+    if(save_state == 0) {
+        //Asks the user if the final result of the model should be saved
+        cout << endl << "To save the final result of the model enter 1, otherwise 0: ";
         cin >> save_result;
+        while(save_result < 0 || save_result > 1) {
+            cout << "Incorrect input, to save the final result of the model enter 1, else 0: ";
+            cin >> save_result;
+        }
     }
     
     //Ask for the state filename if the user specified that the file should be saved
-    if(save_result == 1) {
+    if(save_state == 1 || save_result == 1) {
         cout << "Output filename: ";
         cin >> output_filename;
         while(output_filename.size() <= 0) {
@@ -171,6 +182,7 @@ void load_file() {
     cin >> output_su_filename;
     while(output_su_filename.size() <= 0) {
         cout << "Incorrect input, please enter a valid filename: ";
+        cin >> output_su_filename;
     }
     
     //Loads the input file
@@ -234,7 +246,7 @@ void load_file() {
     //If convection is used for the user specified input file, memory is allocated for its
     //variables and they are read in from the input file
     if(using_convection) {
-        int tmp_val = 0.0;
+        int tmp_val = 0;
         
         //Allocates memory for the convection variables based on the previously read in simulation
         //parameters
@@ -391,7 +403,7 @@ void load_file() {
  * Saves the current state of the simulation, using the same format
  * as the input file
  */
-void save_state() {
+void save_model_state() {
     ofstream output_file;    //Output file stream
     
     //Opens the output file for writing
@@ -605,49 +617,58 @@ void cond_2D(){
     
     for(int i = 0; i < num_rows; i++) {
         for(int j = 0; j < num_cols; j++) {
-            //The top of the model, i.e. row 0's values do not change due to conduction during the simulation
-            if(i == 0) {
-                next_temp[i][j] = temp[i][j];
+            //Calculates heat flow in the X and Y direction into the current
+            //cell based on its location within the model
+            if(i == 0 && j == 0) { //Top left corner
+                heat_flow_x = cond_add_x_2D(i,j,i,j+1);
+                heat_flow_y = cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
             }
-            else {
-                //Calculates heat flow in the X and Y direction into the current
-                //cell based on its location within the model
-                if(i == num_rows-1 && j == 0) { //Bottom left corner
-                    heat_flow_x = cond_add_x_2D(i,j,i,j+1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j);
-                    next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
-                }
-                else if(i == num_rows-1 && j == num_cols-1) { //Bottom right corner
-                    heat_flow_x = cond_add_x_2D(i,j,i,j-1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j);
-                    next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
-                }
-                else if(i == num_rows-1) { //Bottom
-                    heat_flow_x = cond_add_x_2D(i,j,i,j+1) + cond_add_x_2D(i,j,i,j-1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j);
-                    next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
-                }
-                else if(j == 0) { //Left side
-                    heat_flow_x = cond_add_x_2D(i,j,i,j+1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
-                    next_temp[i][j] = 0.0;
-                }
-                else if(j == num_cols-1) { //Right side
-                    heat_flow_x = cond_add_x_2D(i,j,i,j-1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
-                    next_temp[i][j] = 0.0;
-                }
-                else { //Middle
-                    heat_flow_x = cond_add_x_2D(i,j,i,j-1) + cond_add_x_2D(i,j,i,j+1);
-                    heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
-                    next_temp[i][j] = 0.0;
-                }
-                
-                //Heat flow from the adjacent cells
-                next_temp[i][j] += temp[i][j] + time_step*(heat_flow_x + heat_flow_y);
-                //Heat flow due to radioactive heat production
-                next_temp[i][j] += heat_production_values[cond_hp_index[i][j]]*time_step/DTC;
+            else if(i == 0 && j == num_cols-1) { //Top right corner
+                heat_flow_x = cond_add_x_2D(i,j,i,j-1);
+                heat_flow_y = cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
             }
+            else if(i == 0) { //Top
+                heat_flow_x = cond_add_x_2D(i,j,i,j+1) + cond_add_x_2D(i,j,i,j-1);
+                heat_flow_y = cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
+            }
+            else if(i == num_rows-1 && j == 0) { //Bottom left corner
+                heat_flow_x = cond_add_x_2D(i,j,i,j+1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j);
+                next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
+            }
+            else if(i == num_rows-1 && j == num_cols-1) { //Bottom right corner
+                heat_flow_x = cond_add_x_2D(i,j,i,j-1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j);
+                next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
+            }
+            else if(i == num_rows-1) { //Bottom
+                heat_flow_x = cond_add_x_2D(i,j,i,j+1) + cond_add_x_2D(i,j,i,j-1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j);
+                next_temp[i][j] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
+            }
+            else if(j == 0) { //Left side
+                heat_flow_x = cond_add_x_2D(i,j,i,j+1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
+            }
+            else if(j == num_cols-1) { //Right side
+                heat_flow_x = cond_add_x_2D(i,j,i,j-1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
+            }
+            else { //Middle
+                heat_flow_x = cond_add_x_2D(i,j,i,j-1) + cond_add_x_2D(i,j,i,j+1);
+                heat_flow_y = cond_add_y_2D(i,j,i-1,j) + cond_add_y_2D(i,j,i+1,j);
+                next_temp[i][j] = 0.0;
+            }
+            
+            //Heat flow from the adjacent cells
+            next_temp[i][j] += temp[i][j] + time_step*(heat_flow_x + heat_flow_y);
+            //Heat flow due to radioactive heat production
+            next_temp[i][j] += heat_production_values[cond_hp_index[i][j]]*time_step/DTC;
         }
     }
     swap_temp_array();    //Swaps the current and next temperature arrays
@@ -656,7 +677,7 @@ void cond_2D(){
 /**
  * Performs convection between two specified cells
  */
-void perform_conv_2D(REAL time_inc, int x1, int y1, int x2, int y2) {
+void perform_conv_2D(int x1, int y1, int x2, int y2) {
     REAL avg_x_dim;    //Average X dimension for the two cells
     REAL avg_y_dim;    //Average Y dimension for the two cells
     REAL amt;          //
@@ -697,28 +718,28 @@ void conv_2D() {
                     //Performs convection based on the convection direction code
                     switch(conv_direction[i][j]) {
                         case 1:
-                            perform_conv_2D(time_inc,i,j,i-1,j-1);
+                            perform_conv_2D(i,j,i-1,j-1);
                             break;
                         case 2:
-                            perform_conv_2D(time_inc,i,j,i-1,j);
+                            perform_conv_2D(i,j,i-1,j);
                             break;
                         case 3:
-                            perform_conv_2D(time_inc,i,j,i-1,j+1);
+                            perform_conv_2D(i,j,i-1,j+1);
                             break;
                         case 4:
-                            perform_conv_2D(time_inc,i,j,i,j-1);
+                            perform_conv_2D(i,j,i,j-1);
                             break;
                         case 6:
-                            perform_conv_2D(time_inc,i,j,i,j+1);
+                            perform_conv_2D(i,j,i,j+1);
                             break;
                         case 7:
-                            perform_conv_2D(time_inc,i,j,i+1,j-1);
+                            perform_conv_2D(i,j,i+1,j-1);
                             break;
                         case 8:
-                            perform_conv_2D(time_inc,i,j,i+1,j);
+                            perform_conv_2D(i,j,i+1,j);
                             break;
                         case 9:
-                            perform_conv_2D(time_inc,i,j,i+1,j+1);
+                            perform_conv_2D(i,j,i+1,j+1);
                             break;
                     }
                 }
@@ -796,7 +817,7 @@ int main(int argc, char **argv) {
         cout << "Maximum Depth is " << (int)num_rows*dim_y[0] << " Meters" << endl;
         cout << "Enter the Depth to Source in Meters: ";
         cin >> mvsrc_depth;
-        mvsrc_depth  = (int)mvsrc_depth/dim_y[0];
+        mvsrc_depth  = (int)(mvsrc_depth/dim_y[0]);
         cout << "Enter the Temperature of the Moving Source: ";
         cin >> mvsrc_temp;
     }
@@ -859,9 +880,9 @@ int main(int argc, char **argv) {
         if(count%num_loops == 0) {
             cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
             
-            //Saves the current state of the simulation if the save_result flag is set
-            if(save_result) {
-                save_state();
+            //Saves the current state of the simulation if the save_state flag is set
+            if(save_state) {
+                save_model_state();
             }
         }
         
@@ -887,8 +908,8 @@ int main(int argc, char **argv) {
     }
     
     //Saves the final result of the simulation
-    if(save_result) {
-        save_state();
+    if(save_state == 1 || save_result == 1) {
+        save_model_state();
     }
     save_surfer();
     
