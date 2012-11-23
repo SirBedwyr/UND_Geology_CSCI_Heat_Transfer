@@ -137,6 +137,7 @@ void swap_temp_array() {
  */
 void load_file() {
     ifstream source_file;       //Input file stream
+    string temp_str;
     
     //Ask for the input file names and displays an error message
     //if the file does not exist
@@ -236,9 +237,10 @@ void load_file() {
     //are ignored since the simulation accounts for them internally
     for(int i = 0; i < num_rows; i++) {
         for(int j = 0; j < num_cols; j++) {
-            source_file >> cond_codes[i][j];
-            cond_tc_index[i][j] = cond_codes[i][j]/1000 - 1;
-            cond_hp_index[i][j] = (cond_codes[i][j] - (cond_tc_index[i][j]+1)*1000)/100 - 1;
+            source_file >> temp_str;
+            cond_codes[i][j] = atoi(temp_str.c_str());
+            cond_tc_index[i][j] = atoi(temp_str.substr(0,1).c_str())-1;
+            cond_hp_index[i][j] = atoi(temp_str.substr(1,1).c_str())-1;
         }
     }
     cout << "Read " << num_rows << " X " << num_cols << " conduction codes" << endl;
@@ -246,8 +248,6 @@ void load_file() {
     //If convection is used for the user specified input file, memory is allocated for its
     //variables and they are read in from the input file
     if(using_convection) {
-        int tmp_val = 0;
-        
         //Allocates memory for the convection variables based on the previously read in simulation
         //parameters
         conv_codes = new int*[num_rows];
@@ -269,16 +269,13 @@ void load_file() {
         //indexs from the ocdes
         for(int i = 0; i < num_rows; i++) {
             for(int j = 0; j < num_cols; j++) {
-                source_file >> conv_codes[i][j];
-                tmp_val = conv_codes[i][j];
-                conv_min_temp_index[i][j] = conv_codes[i][j] / 10000 - 1;
-                tmp_val -= 10000*(conv_min_temp_index[i][j]+1);
-                conv_vel_index[i][j] = tmp_val/1000 - 1;
-                tmp_val -= 1000*(conv_vel_index[i][j]+1);
-                conv_fluid_index[i][j] = tmp_val/100 - 1;
-                tmp_val -= 100*(conv_fluid_index[i][j]+1);
-                conv_rock_index[i][j] = tmp_val/10 - 1;
-                conv_direction[i][j] = tmp_val - 10*(conv_rock_index[i][j]+1);
+                source_file >> temp_str;
+                conv_codes[i][j] = atoi(temp_str.c_str());
+                conv_min_temp_index[i][j] = atoi(temp_str.substr(0,1).c_str())-1;
+                conv_vel_index[i][j] = atoi(temp_str.substr(1,1).c_str())-1;
+                conv_fluid_index[i][j] = atoi(temp_str.substr(2,1).c_str())-1;
+                conv_rock_index[i][j] = atoi(temp_str.substr(3,1).c_str())-1;
+                conv_direction[i][j] = atoi(temp_str.substr(4,1).c_str());
             }
         }
         cout << "Read " << num_rows << " X " << num_cols << " convection codes" << endl;
