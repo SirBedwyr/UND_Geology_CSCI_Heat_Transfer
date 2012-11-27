@@ -22,6 +22,7 @@
 #define QFAC 14.33              //Description is defined in the previous comment
 #define DTC 0.25                //
 #define OUT_PRECISION 10        //Number of digits to print after the decimal place for floating point values
+#define INDEX_WIDTH 2           //The number of characters to print and read for each conduction and convection code
 #define REAL float              //The precision of the model.
 
 using std::cerr;
@@ -73,18 +74,24 @@ int using_convection;           //Indicates if convection is being used
 REAL ***temp;                   //The current temperature array
 int num_rows;                   //The number of rows for the simulation
 int num_cols;                   //The number of columns for the simulation
-int num_slices;                 // Total number of slices to form the 3d simulation (one 'slice' has dimension rows x columns)
+int num_slices;                 //Total number of slices to form the 3d simulation (one 'slice' has dimension rows x columns)
 REAL *dim_x;                    //The dimensions of each column in the x direction
 REAL *dim_y;                    //The dimensions of each row in the y direction
 REAL *dim_z;                    //The dimensions of each row in the z direction
 REAL chf;                       //Constant Heat flow at base of model in mW M^2
 REAL initial_time;              //The initial starting time of the model
-REAL heat_production_values[8]; //The radioactive heat production values array used in conduction calculations
-REAL thermal_conduct_diff[8];   //The thermal conductivity difference array used in conduction calculations
-REAL heat_capac_fluid[8];       //The fluid heat capacity array used in convection calculations
-REAL heat_capac_rock[8];        //The rock heat capacity array used in convection calculations
-REAL min_temp_conv[8];          //The minimum temperature required for convection
-REAL vel[8];                    //The velocity array used for convection calculations
+int num_hp;                     //The number of heat production values
+int num_tcd;                    //The number of thermal conductivity difference values
+int num_hcf;                    //The number of fluid heat capacity values
+int num_hcr;                    //The number of rock heat capacity values
+int num_mtc;                    //The number of minimum convection temperature values
+int num_vel;                    //The number of convection velocities
+REAL *heat_production_values;   //The radioactive heat production values array used in conduction calculations
+REAL *thermal_conduct_diff;     //The thermal conductivity difference array used in conduction calculations
+REAL *heat_capac_fluid;         //The fluid heat capacity array used in convection calculations
+REAL *heat_capac_rock;          //The rock heat capacity array used in convection calculations
+REAL *min_temp_conv;            //The minimum temperature required for convection
+REAL *vel;                      //The velocity array used for convection calculations
 
 //Moving source variables
 int using_moving_source;        //Indicates if a moving source is being used
@@ -194,7 +201,8 @@ void load_file() {
     //Retrieves the simulation parameters from the input file
     source_file >> num_rows >> num_cols >> num_slices >> using_convection;
     source_file >> chf >> initial_time;
-    source_file >> title;
+    getline(source_file,title);
+    getline(source_file,title);
     
     //displays parameters of the input file
     cout << endl << endl << "Number of rows   = " << num_rows << endl;
@@ -257,8 +265,8 @@ void load_file() {
             for(int j = 0; j < num_cols; j++) {
                 source_file >> temp_str;
                 cond_codes[i][j][k] = atoi(temp_str.c_str());
-                cond_tc_index[i][j][k] = atoi(temp_str.substr(0,1).c_str())-1;
-                cond_hp_index[i][j][k] = atoi(temp_str.substr(1,1).c_str())-1;
+                cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
             }
         }
     }
@@ -299,11 +307,11 @@ void load_file() {
                 for(int j = 0; j < num_cols; j++) {
                     source_file >> temp_str;
                     conv_codes[i][j][k] = atoi(temp_str.c_str());
-                    conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0,1).c_str())-1;
-                    conv_vel_index[i][j][k] = atoi(temp_str.substr(1,1).c_str())-1;
-                    conv_fluid_index[i][j][k] = atoi(temp_str.substr(2,1).c_str())-1;
-                    conv_rock_index[i][j][k] = atoi(temp_str.substr(3,1).c_str())-1;
-                    conv_direction[i][j][k] = atoi(temp_str.substr(4,1).c_str());
+                    conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
                 }
             }
         }
@@ -341,62 +349,74 @@ void load_file() {
     }
 
     //Reads in the conduction heat production values
-    for(int i = 0; i < 8; i++) {
+    source_file >> num_hp;
+    heat_production_values = new REAL[num_hp];
+    for(int i = 0; i < num_hp; i++) {
         source_file >> heat_production_values[i];
+        heat_production_values[i] /= 1E6;
     }
-    cout << "Read 8 heat production values" << endl;
+    cout << "Read "<< num_hp << " heat production values" << endl;
     
     //Reads in the thermal conduction difference values
-    for(int i = 0; i < 8; i++) {
-        source_file >> thermal_conduct_diff[i];
-    }
-    cout << "Converted 8 Thermal Conductivities to Diff. in m^2/y" << endl;
-    
     //Finds the minimum and maximum thermal conductivity differences and
     //performs some scaling of the conduction associated variables
-    max_thermal_conduct_diff = thermal_conduct_diff[0];
-    min_thermal_conduct_diff = thermal_conduct_diff[0];
-    for(int i = 0; i < 8; i++) {
-        heat_production_values[i] /= 1E6;
+    source_file >> num_tcd;
+    thermal_conduct_diff = new REAL[num_tcd];
+    cout << "Converted " << num_tcd << " Thermal Conductivities to Diff. in m^2/y" << endl;
+    for(int i = 0; i < num_tcd; i++) {
+        source_file >> thermal_conduct_diff[i];
         thermal_conduct_diff[i] *= 14.33;
-
-        if(thermal_conduct_diff[i] > max_thermal_conduct_diff) {
-            max_thermal_conduct_diff = thermal_conduct_diff[i];
+        if(i == 0) {
+            max_thermal_conduct_diff = thermal_conduct_diff[0];
+            min_thermal_conduct_diff = thermal_conduct_diff[0];
         }
-        if(thermal_conduct_diff[i] < min_thermal_conduct_diff) {
-            min_thermal_conduct_diff = thermal_conduct_diff[i];
+        else {
+            if(thermal_conduct_diff[i] > max_thermal_conduct_diff) {
+                max_thermal_conduct_diff = thermal_conduct_diff[i];
+            }
+            if(thermal_conduct_diff[i] < min_thermal_conduct_diff) {
+                min_thermal_conduct_diff = thermal_conduct_diff[i];
+            }
         }
         cout << "  " << thermal_conduct_diff[i];
     }
-    
+
     //Reads in the convection specific variables if convection
     //is used by the user specified input file
     if(using_convection) {
         //Reads in the fluid heat capacity values
-        for(int i = 0; i < 8; i++) {
+        source_file >> num_hcf;
+        heat_capac_fluid = new REAL[num_hcf];
+        for(int i = 0; i < num_hcf; i++) {
             source_file >> heat_capac_fluid[i];
         }
         
         //Reads in the rock heat capacity values
-        for(int i = 0; i < 8; i++) {
+        source_file >> num_hcr;
+        heat_capac_rock = new REAL[num_hcr];
+        for(int i = 0; i < num_hcr; i++) {
             source_file >> heat_capac_rock[i];
         }
         
         //Reads in the minimum convection temperatures
-        for(int i = 0; i < 8; i++) {
+        source_file >> num_mtc;
+        min_temp_conv = new REAL[num_mtc];
+        for(int i = 0; i < num_mtc; i++) {
             
             source_file >> min_temp_conv[i];
         }
         //Reads in the convection velocities
-        for(int i = 0; i < 8; i++) {
+        source_file >> num_vel;
+        vel = new REAL[num_vel];
+        for(int i = 0; i < num_vel; i++) {
             source_file >> vel[i];
         }
-        cout << endl << "Read 8 Velocities in m/yr" << endl;
+        cout << endl << "Read " << num_vel << " Velocities in m/yr" << endl;
         
         //Finds the maximum convection velocity
         max_vel = vel[0];
         cout << " " << vel[0];
-        for(int i = 1 ; i < 8; i++) {
+        for(int i = 1 ; i < num_vel; i++) {
             if(vel[i] > max_vel) {
                 max_vel = vel[i];
             }
@@ -464,10 +484,11 @@ void save_model_state() {
         }
         
         //Prints the conduction codes of the simulation to the output file
+        output_file << setfill('0');
         for (int k = 0; k < num_slices; k++) {
             for(int i = 0; i < num_rows; i++) {
                 for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << cond_codes[i][j][k];
+                    output_file << " " << setw(2*INDEX_WIDTH) << cond_codes[i][j][k];
                 }
                 output_file << endl;
             }
@@ -479,7 +500,7 @@ void save_model_state() {
             for (int k = 0; k < num_slices; k++) {
                 for(int i = 0; i < num_rows; i++) {
                     for(int j = 0; j < num_cols; j++) {
-                        output_file << " " << conv_codes[i][j][k];
+                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i][j][k];
                     }
                     output_file << endl;
                 }
@@ -487,6 +508,7 @@ void save_model_state() {
             }
         }
         
+        output_file << setfill(' ');
         output_file << setprecision(3);
         //Prints the column (X) dimensions of the simulation to the output file
         for(int i = 0; i < num_cols; i++) {
@@ -508,13 +530,15 @@ void save_model_state() {
         output_file << endl;
 
         //Prints the heat production values of the simulation to the output file
-        for(int i = 0; i < 8 ; i++) {
+        output_file << " " << num_hp;
+        for(int i = 0; i < num_hp; i++) {
             output_file << " " << scientific << heat_production_values[i]*1E6;
         }
         output_file << endl;
         
         //Prints the thermal conductivity difference values to the output file
-        for(int i = 0; i < 8 ; i++) {
+        output_file << " " << num_tcd;
+        for(int i = 0; i < num_tcd; i++) {
             output_file << " " << thermal_conduct_diff[i]/14.33;
         }
         output_file << endl;
@@ -522,25 +546,29 @@ void save_model_state() {
         //Prints the convection specific variables to the output file if convection is used
         if(using_convection) {
             //Prints the fluid heat capacity values to the output file
-            for(int i = 0; i < 8 ; i++) {
+            output_file << " " << num_hcf;
+            for(int i = 0; i < num_hcf; i++) {
                 output_file << " " << heat_capac_fluid[i];
             }
             output_file << endl;
             
             //Prints the rock heat capacity values to the output file
-            for(int i = 0; i < 8 ; i++) {
+            output_file << " " << num_hcr;
+            for(int i = 0; i < num_hcr; i++) {
                 output_file << " " << heat_capac_rock[i];
             }
             output_file << endl;
             
             //Prints the minimum convection temps to the output file
-            for(int i = 0; i < 8 ; i++) {
+            output_file << " " << num_mtc;
+            for(int i = 0; i < num_mtc; i++) {
                 output_file << " " << min_temp_conv[i];
             }
             output_file << endl;
             
             //Prints the convection velocities to the output file
-            for(int i = 0; i < 8 ; i++) {
+            output_file << " " << num_vel;
+            for(int i = 0; i < num_vel; i++) {
                 output_file << " " << vel[i];
             }
             output_file << endl;
@@ -1153,6 +1181,8 @@ int main(int argc, char **argv) {
     delete[] cond_codes;
     delete[] cond_hp_index;
     delete[] cond_tc_index;
+    delete[] heat_production_values;
+    delete[] thermal_conduct_diff;
     if(using_convection) {
         delete[] conv_codes;
         delete[] conv_min_temp_index;
@@ -1160,8 +1190,12 @@ int main(int argc, char **argv) {
         delete[] conv_vel_index;
         delete[] conv_fluid_index;
         delete[] conv_rock_index;
+        delete[] heat_capac_fluid;
+        delete[] heat_capac_rock;
+        delete[] min_temp_conv;
+        delete[] vel;
     }
-        
+    
     //Waits for the user to hit enter before ending the simulation
     cout << endl << "Simulation Complete" << endl;
     PressEnterToContinue();

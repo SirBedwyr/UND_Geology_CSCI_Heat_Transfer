@@ -193,7 +193,8 @@ void load_file() {
     //Retrieves the simulation parameters from the input file
     source_file >> num_rows >> num_cols >> using_convection;
     source_file >> chf >> initial_time;
-    source_file >> title;
+    getline(source_file,title);
+    getline(source_file,title);
     
     //displays parameters of the input file
     cout << endl << endl << "Number of rows  = " << num_rows << endl;
