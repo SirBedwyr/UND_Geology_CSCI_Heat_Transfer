@@ -4,21 +4,7 @@
  */
 
 #ifdef _WIN32
-#define NOMINMAX //FYI need to disable min/max macro in windows.h
 #include <windows.h>
-#define M_PI 3.14159265
-#endif
-
-#ifdef DISPLAY
-#ifdef __APPLE__
-#  include <OpenGL/gl.h>
-#  include <OpenGL/glu.h>
-#  include <GLUT/glut.h>
-#else
-#  include <GL/GL.h>
-#  include <GL/GLU.h>
-#  include <GL/glut.h>
-#endif
 #endif
 
 #include <iostream>
@@ -59,12 +45,6 @@ using std::numeric_limits;
 using std::streamsize;
 using std::max;
 using std::flush;
-
-void save_surfer();
-void save_model_state();
-void conduction();
-void convection();
-void PressEnterToContinue();
 
 //Conduction code specific variables
 int ***cond_codes;              //The unmodified conduction codes as read from the input file
@@ -139,380 +119,6 @@ REAL max_thermal_conduct_diff;  //The maximum thermal conductivity difference
 REAL min_thermal_conduct_diff;  //The minimum thermal conductivity difference
 int num_loops;                  //The number of loops between screen updates
 int su_num_width;               //The number of characters for the slice number in the output surfer filenames.
-unsigned long long count = 0;	//The current loop
-
-#ifdef DISPLAY
-//Display variables
-int display_mode;
-int window_width, window_height, window_depth;
-int window_size;
-int array_size;
-REAL min_temp;
-REAL max_temp;
-REAL layer_min_temp;
-REAL layer_max_temp;
-float *color_field;
-float transparency = 1.0f;
-int current_slice = 0;
-
-/**
- *  Parameters to control the camera angle so we can move where we're looking at
- *  the simulation from with the mouse
- */
-/*
-int     ox                  = 0;
-int     oy                  = 0;
-int     buttonState         = 0; 
-float   camera_trans[]      = {0, -0.2, -10};
-float   camera_rot[]        = {0, 0, 0};
-float   camera_trans_lag[]  = {0, -0.2, -10};
-float   camera_rot_lag[]    = {0, 0, 0};
-const float inertia         = 0.1f;
-*/
-
-//Sets max and min temperature values
-void array_minmax() {
-	min_temp=temp[0][0][0];
-	max_temp=temp[0][0][0];
-    for(int k=0; k<num_slices; k++) {
-		for (int i=0; i<num_rows; i++) {
-			for(int j=0; j<num_cols; j++) {
-				if(temp[i][j][k]<min_temp)
-					min_temp = temp[i][j][k];
-				if(temp[i][j][k]>max_temp)
-					max_temp = temp[i][j][k];
-			}
-		}
-	}
-}
-
-//3D to 1D indexing
-static int POSITION(int x, int y, int z) {
-	return (z * num_cols*num_rows) + (x*num_cols)+y;
-}
-
-
-//Colormap algorithm intended to reproduce Matlab's RGB "Jet" plate
-//Concept based on: http://paulbourke.net/texture_colour/colourspace/ (11/21/12)
-void jet_color_set(int x, int y, int z) {
-	REAL current_temp = temp[x][y][z];
-	REAL delta_temp = max_temp - min_temp;
-	
-	if(current_temp < min_temp)
-		current_temp = min_temp;
-	if(current_temp > max_temp)
-		current_temp = max_temp;
-
-	if(current_temp < (min_temp + 0.25 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 0.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 4*(current_temp - min_temp)/delta_temp;
-		color_field[POSITION(x,y,z) * 3 + 2] = 1.0;
-	}
-	else if(current_temp < (min_temp + 0.5 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 0.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0;	
-		color_field[POSITION(x,y,z) * 3 + 2] = 1.0 + 4 * (min_temp + 0.25 * delta_temp - current_temp) / delta_temp;
-	}
-	else if(current_temp < (min_temp + 0.75 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 4 * (current_temp - min_temp - 0.5 * delta_temp) / delta_temp;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0;
-		color_field[POSITION(x,y,z) * 3 + 2] = 0.0;
-	}
-	else {
-		color_field[POSITION(x,y,z) * 3] = 1.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0 + 4 * (min_temp + 0.75 * delta_temp - current_temp) / delta_temp;
-		color_field[POSITION(x,y,z) * 3 + 2] = 0.0;
-	}
-}
-
-
-//Cube dimensions hardcoded to 1
-//From Robert Bergmans voxel display code
-void draw_cube(int x, int y, int z) {
-	if(z == current_slice) {
-		transparency = 1.0;
-	}
-	else {
-		transparency = 0.3;
-	}
-	glBegin(GL_QUADS);
-		//front
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-
-		//top
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(0.0f,0.0f,1.0f);//5
-
-		/*//left
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-		glVertex3f(0.0f,-1.0f,0.0f);//4
-
-		//right
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(1.0f,-1.0f,0.0f);//3
-
-		//bottom
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,-1.0f,0.0f);//4
-		glVertex3f(1.0f,-1.0f,0.0f);//3
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-
-		//back
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,-1.0f,0.0f);//3
-		glVertex3f(0.0f,-1.0f,0.0f);//4
-		*/
-
-	glEnd();
-}
-
-//Set and draw temp faces
-void draw_temp_map() {
-	for(int i=0; i<num_rows; i++) {
-		for (int j=0; j<num_cols; j++) {
-			glPushMatrix();
-			glTranslatef(j,-i,current_slice);
-			jet_color_set(i,j,current_slice);
-			draw_cube(i,j,current_slice);
-			glPopMatrix();
-		}
-	}
-}
-
-void display() {
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glEnable(GL_DEPTH_TEST);
-
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	/**
-     *  Handle the camera angle.
-     */
-	/*
-    for (int c = 0; c < 3; ++c)
-    {
-        camera_trans_lag[c] += (camera_trans[c] - camera_trans_lag[c]) * inertia;
-        camera_rot_lag[c] += (camera_rot[c] - camera_rot_lag[c]) * inertia;
-    }
-
-    glTranslatef(camera_trans_lag[0], camera_trans_lag[1], camera_trans_lag[2]);
-    glRotatef(camera_rot_lag[0], 1.0, 0.0, 0.0);
-    glRotatef(camera_rot_lag[1], 0.0, 1.0, 0.0);
-	*/
-	//Draw the boundary lines
-	glBegin(GL_LINES);
-		glColor3f(1.0, 1.0, 1.0);
-
-		glVertex3f(0,0,0);
-		glVertex3f(num_cols,0,0);
-		glVertex3f(num_cols,0,0);
-		glVertex3f(num_cols,-num_rows,0);
-		glVertex3f(num_cols,-num_rows,0);
-		glVertex3f(0,-num_rows,0);
-		glVertex3f(0,-num_rows,0);
-		glVertex3f(0,0,0);
-
-		glVertex3f(0,0,num_slices);
-		glVertex3f(num_cols,0,num_slices);
-		glVertex3f(num_cols,0,num_slices);
-		glVertex3f(num_cols,-num_rows,num_slices);
-		glVertex3f(num_cols,-num_rows,num_slices);
-		glVertex3f(0,-num_rows,num_slices);
-		glVertex3f(0,-num_rows,num_slices);
-		glVertex3f(0,0,num_slices);
-
-		glVertex3f(0,0,0);
-		glVertex3f(0,0,num_slices);
-		glVertex3f(num_cols,0,0);
-		glVertex3f(num_cols,0,num_slices);
-		glVertex3f(num_cols,-num_rows,0);
-		glVertex3f(num_cols,-num_rows,num_slices);
-		glVertex3f(0,-num_rows,0);
-		glVertex3f(0,-num_rows,num_slices);
-	glEnd();
-
-	draw_temp_map();
-
-	glutSwapBuffers();
-	glutPostRedisplay();
-}
-
-void display3D() {
-	//Displays status information for the current loop
-	if(count%num_loops == 0) {
-		cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
-
-		//Saves the current state of the simulation if the save_state flag is set
-		if(save_state) {
-			save_model_state();
-		}
-		display();
-	}
-	if(sim_time <= run_time) {
-		//Updates the moving source
-		if(using_moving_source) {
-			if(mvsrc_start_col < mvsrc_end_col) {
-				mvsrc_start_col++;
-				temp[mvsrc_depth][mvsrc_start_col][0] = mvsrc_temp;
-			}
-		}
-
-		//Performs convection updates if the current simulation is using convection
-		if(using_convection) {
-			convection();
-		}
-
-		//Performs conduction calculations
-		conduction();
-
-		//Increments the simulation time and loop count
-		sim_time += time_step;
-		count++;
-	}
-	else {
-		//Saves the final result of the simulation
-		if(save_state == 1 || save_result == 1) {
-			save_model_state();
-		}
-		save_surfer();
-		cout << endl << "Simulation Complete" << endl;
-		delete[] color_field;
-		PressEnterToContinue();
-		exit(0);
-	}
-	glutPostRedisplay();
-}
-
-
-/**
- * This captures information when the mous buttons are pressed
- */
-/*
-void mouse_button(int button, int state, int x, int y) {
-    int mods;
-
-    if (state == GLUT_DOWN)
-        buttonState |= 1<<button;
-    else if (state == GLUT_UP)
-        buttonState = 0;
-
-    mods = glutGetModifiers();
-    if (mods & GLUT_ACTIVE_SHIFT) 
-    {
-        buttonState = 2;
-    } 
-    else if (mods & GLUT_ACTIVE_CTRL) 
-    {
-        buttonState = 3;
-    }
-
-    ox = x; oy = y;
-
-    glutPostRedisplay();
-}
-*/
-
-/**
- *  This captures mouse motion information.
- */
-/*
-void mouse_move(int x, int y) {
-    float dx = (float)(x - ox);
-    float dy = (float)(y - oy);
-
-    if (buttonState == 3) 
-    {
-        // left+middle = zoom
-        camera_trans[2] += (dy / 100.0f) * 0.5f * fabs(camera_trans[2]);
-    } 
-    else if (buttonState & 2) 
-    {
-        // middle = translate
-        camera_trans[0] += dx / 10.0f;
-        camera_trans[1] -= dy / 10.0f;
-    }
-    else if (buttonState & 1) 
-    {
-        // left = rotate
-        camera_rot[0] += dy / 5.0f;
-        camera_rot[1] += dx / 5.0f;
-    }
-
-    ox = x; oy = y;
-    glutPostRedisplay();
-}
-*/
-
-void keyboard(unsigned char key, int x, int y) {
-	switch(key) {
-		case '-':
-			if(current_slice > 0) {
-				current_slice--;
-				//camera_trans[1]-=0.5;
-				//camera_trans[2]+=1.0;
-				glMatrixMode(GL_PROJECTION);
-				glLoadIdentity();
-				gluPerspective(60, 1.77777f, 1.0, 20000.0);
-				gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
-			}
-			break;
-		case '+':
-			if(current_slice < num_slices-1) {
-				current_slice++;
-				//camera_trans[1]+=0.5;
-				//camera_trans[2]-=1.0;
-				glMatrixMode(GL_PROJECTION);
-				glLoadIdentity();
-				gluPerspective(60, 1.77777f, 1.0, 20000.0);
-				gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
-			}
-			break;
-		case 'x':
-			exit(0);
-		default:
-			break;
-	}
-	display();
-}
-
-void glutinit() {
-
-}
-#endif
 
 /**
  * This function waits for the user to hit enter before continuing
@@ -1376,28 +982,6 @@ void convection() {
  * conduction and convection.
  */
 int main(int argc, char **argv) {
-
-#ifdef DISPLAY
-    if (argc != 4) {
-        cerr << "Cannot continue. " << argv[0] << " is not the correct number of arguments. Please pass <window width>, <window height>, <window depth>" << endl;
-        exit(0);
-    }
-	
-    window_width = atoi(argv[1]);
-    window_height = atoi(argv[2]);
-	window_depth = atoi(argv[3]);
-
-    window_size = window_width * window_height;
-
-	//Asks the user if they wish to visualize results
-    cout << endl << "Press 1 to run visualization, otherwise 0: ";
-    cin >> display_mode;
-    while(display_mode < 0 || display_mode > 1) {
-        cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
-        cin >> display_mode;
-    }
-#endif
-
     int input_val;    //Temporary int value
     REAL temp_val;    //Temporary REAL value
     
@@ -1515,51 +1099,10 @@ int main(int argc, char **argv) {
     cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
     PressEnterToContinue();
     
-#ifdef DISPLAY
-	array_minmax();
-	array_size = num_cols * num_rows * num_slices;
-	color_field = new float[array_size * 3];
-	for (int i=0; i<array_size *3; i++) {
-		color_field[i] = 0.0;
-	}
-
-	glutInit(&argc, argv);
-	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
-	glutInitWindowSize(1280, 720);
-	glutInitWindowPosition(300, 200);
-	
-	glutCreateWindow("ARC Simulation");
-
-	glViewport(0, 0, 1280,720);
-
-	glEnable (GL_BLEND);
-	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	gluPerspective(60, 1.77777f, 1.0, 20000.0);
-
-	glutDisplayFunc(display3D);
-	
-	//glutMouseFunc(mouse_button);
-   // glutMotionFunc(mouse_move);
-	glutKeyboardFunc(keyboard);
-	/*camera_trans[0] = -num_cols/2.0;
-	camera_trans[1] = num_rows/3.0;
-	camera_trans[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
-	camera_rot[0] = 28.0;
-	camera_trans_lag[0] = -num_cols/2.0;
-	camera_trans_lag[1] = num_rows/3.0;
-	camera_trans_lag[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
-	camera_rot_lag[0] = 28.0;
-	*/
-	gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
-	glutMainLoop();
-#else
-	/**
+    /**
      * The main loop of the simulation
      */
-    count = 0;    //Number of loops performed
+    unsigned long count = 0;    //Number of loops performed
     cout << endl << endl << num_loops << " loops between screen updates" << endl << endl;
     cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << endl;
     while(sim_time <= run_time) {
@@ -1593,17 +1136,12 @@ int main(int argc, char **argv) {
         sim_time += time_step;
         count++;
     }
-
+    
     //Saves the final result of the simulation
     if(save_state == 1 || save_result == 1) {
         save_model_state();
     }
     save_surfer();
-
-	//Waits for the user to hit enter before ending the simulation
-    cout << endl << "Simulation Complete" << endl;
-    PressEnterToContinue();
-#endif
 
     //Deletes allocated memory
     for(int i = 0; i < num_rows; i++) {
@@ -1657,4 +1195,8 @@ int main(int argc, char **argv) {
         delete[] min_temp_conv;
         delete[] vel;
     }
+    
+    //Waits for the user to hit enter before ending the simulation
+    cout << endl << "Simulation Complete" << endl;
+    PressEnterToContinue();
 }
