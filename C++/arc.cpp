@@ -2,11 +2,10 @@
  * Performs a finite difference heat flow 
  * simulation using conduction and convection.
  */
-
+#define _USE_MATH_DEFINES
 #ifdef _WIN32
 #define NOMINMAX //FYI need to disable min/max macro in windows.h
 #include <windows.h>
-#define M_PI 3.14159265
 #endif
 
 #ifdef DISPLAY
@@ -27,7 +26,7 @@
 #include <string>
 #include <iomanip>
 #include <limits>
-#include <math.h>
+#include <cmath>
 
 /**
  * Time_step (seconds/yr) divided by the product of density and heat capacity.
@@ -65,6 +64,9 @@ void save_model_state();
 void conduction();
 void convection();
 void PressEnterToContinue();
+REAL find_max_temp_diff();
+void update_moving_sources();
+void find_loc_index(REAL x_loc, REAL y_loc, REAL z_loc, int *index);
 
 //Conduction code specific variables
 int ***cond_codes;              //The unmodified conduction codes as read from the input file
@@ -90,7 +92,7 @@ string output_su_filename;      //The output surfer files name with extension
 
 //Input file variables
 string title;                   //The title of the input file
-int using_convection;           //Indicates if convection is being used
+int using_convection = -1;      //Indicates if convection is being used
 REAL ***temp;                   //The current temperature array
 int num_rows;                   //The number of rows for the simulation
 int num_cols;                   //The number of columns for the simulation
@@ -98,6 +100,12 @@ int num_slices;                 //Total number of slices to form the 3d simulati
 REAL *dim_x;                    //The dimensions of each column in the x direction
 REAL *dim_y;                    //The dimensions of each row in the y direction
 REAL *dim_z;                    //The dimensions of each row in the z direction
+REAL *dist_x;                   //The distance from the origin to the center of a column for a given column index in the x direction
+REAL *dist_y;                   //The distance from the origin to the center of a row for a given row index in the y direction
+REAL *dist_z;                   //The distance from the origin to the center of a slice for a given slice index in the z direction
+REAL max_dist_x;                //The maximum x distance
+REAL max_dist_y;                //The maximum y distance
+REAL max_dist_z;                //The maximum z distance
 REAL chf;                       //Constant Heat flow at base of model in mW M^2
 REAL initial_time;              //The initial starting time of the model
 int num_hp;                     //The number of heat production values
@@ -114,21 +122,38 @@ REAL *min_temp_conv;            //The minimum temperature required for convectio
 REAL *vel;                      //The velocity array used for convection calculations
 
 //Moving source variables
-int using_moving_source;        //Indicates if a moving source is being used
-int mvsrc_start_col;            //Starting column of the moving source
-int mvsrc_end_col;              //Ending column of the moving source
-int mvsrc_depth;                //The depth of the moving source (defines the row in the simulation)
-REAL mvsrc_temp;                //The temperature of the moving source
+/*int using_moving_source = -1;   //Indicates if a moving source is being used
+int mvsrc_start_col = -1;       //Starting column of the moving source
+int mvsrc_end_col = -1;         //Ending column of the moving source
+int mvsrc_depth = -1;           //The depth of the moving source (defines the row in the simulation)
+*/
+int using_moving_source = -1;   //Indicates if a moving source is being used
+int num_mvsrc = -1;                  //The number of moving sources
+REAL *mvsrc_x;                  //The x location of the moving sources
+REAL *mvsrc_y;                  //The y location of the moving sources
+REAL *mvsrc_z;                  //The z location of the moving sources
+REAL *mvsrc_offset_x;           //The size of the moving sources in the x direction
+REAL *mvsrc_offset_y;           //The size of the moving sources in the y direction
+REAL *mvsrc_offset_z;           //The size of the moving sources in the z direction
+REAL *mvsrc_vel_x;              //The x component of the moving sources velocity vectors
+REAL *mvsrc_vel_y;              //The y component of the moving sources velocity vectors
+REAL *mvsrc_vel_z;              //The z component of the moving sources velocity vectors
+REAL *mvsrc_accel_x;            //The x component of the moving sources acceleration vectors
+REAL *mvsrc_accel_y;            //The y component of the moving sources acceleration vectors
+REAL *mvsrc_accel_z;            //The z component of the moving sources acceleration vectors
+REAL *mvsrc_temp;               //The temperature of the moving sources
+int *mvsrc_valid;               //Indicates if a moving source is valid
 
 //Time specific variables
 REAL sim_time;                  //The current time of the simulation
 REAL tic;                       //Time variable used in convection calculations
-REAL time_step;                 //The amount of time that passes between each update of the simulation, time step
-REAL run_time;                  //The run time of the simulation
+REAL time_step = -1;            //The amount of time that passes between each update of the simulation, time step
+REAL run_time = -1;             //The run time of the simulation
 
 //Global variables
-int save_state;                 //Indicates if the model should save the current state at each screen update
-int save_result;                //Indicates if the model should save the final result of the simulaiton
+int save_state = -1;            //Indicates if the model should save the current state at each screen update
+int save_result = -1;           //Indicates if the model should save the final result of the simulaiton
+int use_tolerance = -1;         //Indicates if the model should stop once a user specified tolerance is met for temperature change
 REAL max_vel;                   //The maximum convection velocity of the velocity array
 REAL min_row_dim;               //The minimum y dimension of each cell of the simulation
 REAL min_col_dim;               //The minimum x dimension of each cell of the simulation
@@ -137,13 +162,93 @@ REAL thermal_time_constant;     //The thermal time constant of the model, used i
 REAL ***next_temp;              //The next temperature array
 REAL max_thermal_conduct_diff;  //The maximum thermal conductivity difference
 REAL min_thermal_conduct_diff;  //The minimum thermal conductivity difference
-int num_loops;                  //The number of loops between screen updates
-int su_num_width;               //The number of characters for the slice number in the output surfer filenames.
+int num_loops = -1;             //The number of loops between screen updates
+int su_num_width;               //The number of characters for the slice number in the output surfer filenames
 unsigned long long count = 0;	//The current loop
+REAL tolerance = -1;            //The maximum difference required for the model to stop
+REAL max_temp_diff;             //The maximum temperature difference between the current and next temperature arrays
+
+/**
+ * Deallocates all allocated memory used by the program
+ */
+void deallocate_memory() {
+     //Deletes allocated memory
+    for(int i = 0; i < num_rows; i++) {
+        for(int j = 0; j < num_cols; j++) {
+            delete[] temp[i][j];
+            delete[] next_temp[i][j];
+            delete[] cond_codes[i][j];
+            delete[] cond_hp_index[i][j];
+            delete[] cond_tc_index[i][j];
+            if(using_convection) {
+                delete[] conv_codes[i][j];
+                delete[] conv_min_temp_index[i][j];
+                delete[] conv_direction[i][j];
+                delete[] conv_vel_index[i][j];
+                delete[] conv_fluid_index[i][j];
+                delete[] conv_rock_index[i][j];
+            }
+        }
+        delete[] temp[i];
+        delete[] next_temp[i];
+        delete[] cond_codes[i];
+        delete[] cond_hp_index[i];
+        delete[] cond_tc_index[i];
+        if(using_convection) {
+            delete[] conv_codes[i];
+            delete[] conv_min_temp_index[i];
+            delete[] conv_direction[i];
+            delete[] conv_vel_index[i];
+            delete[] conv_fluid_index[i];
+            delete[] conv_rock_index[i];
+        }
+    }
+    delete[] dim_x;
+    delete[] dim_y;
+    delete[] dim_z;
+    delete[] dist_x;
+    delete[] dist_y;
+    delete[] dist_z;
+    delete[] temp;
+    delete[] next_temp;
+    delete[] cond_codes;
+    delete[] cond_hp_index;
+    delete[] cond_tc_index;
+    delete[] heat_production_values;
+    delete[] thermal_conduct_diff;
+    if(using_convection == 1) {
+        delete[] conv_codes;
+        delete[] conv_min_temp_index;
+        delete[] conv_direction;
+        delete[] conv_vel_index;
+        delete[] conv_fluid_index;
+        delete[] conv_rock_index;
+        delete[] heat_capac_fluid;
+        delete[] heat_capac_rock;
+        delete[] min_temp_conv;
+        delete[] vel;
+    }
+    if(using_moving_source == 1) {
+        delete[] mvsrc_x;
+        delete[] mvsrc_y;
+        delete[] mvsrc_z;
+        delete[] mvsrc_offset_x;
+        delete[] mvsrc_offset_y;
+        delete[] mvsrc_offset_z;
+        delete[] mvsrc_vel_x;
+        delete[] mvsrc_vel_y;
+        delete[] mvsrc_vel_z;
+        delete[] mvsrc_accel_x;
+        delete[] mvsrc_accel_y;
+        delete[] mvsrc_accel_z;
+        delete[] mvsrc_temp;
+        delete[] mvsrc_valid;
+    }
+}
 
 #ifdef DISPLAY
 //Display variables
-int display_mode;
+int display_mode = -1;
 int window_width, window_height, window_depth;
 int window_size;
 int array_size;
@@ -374,7 +479,12 @@ void display() {
 void display3D() {
 	//Displays status information for the current loop
 	if(count%num_loops == 0) {
-		cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
+        if(use_tolerance == 0) {
+		    cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
+        }
+        else {
+            cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << setw(20) << max_temp_diff << endl;
+        }
 
 		//Saves the current state of the simulation if the save_state flag is set
 		if(save_state) {
@@ -383,14 +493,6 @@ void display3D() {
 		display();
 	}
 	if(sim_time <= run_time) {
-		//Updates the moving source
-		if(using_moving_source) {
-			if(mvsrc_start_col < mvsrc_end_col) {
-				mvsrc_start_col++;
-				temp[mvsrc_depth][mvsrc_start_col][0] = mvsrc_temp;
-			}
-		}
-
 		//Performs convection updates if the current simulation is using convection
 		if(using_convection) {
 			convection();
@@ -402,6 +504,29 @@ void display3D() {
 		//Increments the simulation time and loop count
 		sim_time += time_step;
 		count++;
+        
+        if(use_tolerance == 1) {
+            max_temp_diff = find_max_temp_diff();
+            if(max_temp_diff < tolerance) {
+                cout << "Maximum temperature change below the tolerance, stoping the simulation" << endl;
+                //Saves the final result of the simulation
+                if(save_state == 1 || save_result == 1) {
+                    save_model_state();
+                }
+                save_surfer();
+                cout << endl << "Simulation Complete" << endl;
+
+                delete[] color_field;
+                deallocate_memory();
+                PressEnterToContinue();
+                exit(0);
+            }
+        }
+
+        //Updates the moving source
+        if(using_moving_source == 1) {
+		    update_moving_sources();
+        }
 	}
 	else {
 		//Saves the final result of the simulation
@@ -410,7 +535,9 @@ void display3D() {
 		}
 		save_surfer();
 		cout << endl << "Simulation Complete" << endl;
+
 		delete[] color_field;
+        deallocate_memory();
 		PressEnterToContinue();
 		exit(0);
 	}
@@ -515,12 +642,21 @@ void glutinit() {
 #endif
 
 /**
+ * Clears the cin buffer
+ */
+void clear_cin() {
+	cin.clear();
+	cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
+}
+
+/**
  * This function waits for the user to hit enter before continuing
  */
 void PressEnterToContinue() {
     cout << "Press ENTER to continue... " << flush;
-    cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
+    clear_cin();
 }
+
 
 /**
  * Swaps the temp arrays
@@ -555,19 +691,17 @@ void load_file() {
     
     //Asks the user if the state of the model should be saved every screen update
     cout << endl << "To save the state of the model every screen update enter 1, otherwise 0: ";
-    cin >> save_state;
-    while(save_state < 0 || save_state > 1) {
+    while(!(cin >> save_state) || save_state < 0 || save_state > 1) {
+		clear_cin();
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
-        cin >> save_state;
     }
-    
+
     if(save_state == 0) {
         //Asks the user if the final result of the model should be saved
         cout << endl << "To save the final result of the model enter 1, otherwise 0: ";
-        cin >> save_result;
-        while(save_result < 0 || save_result > 1) {
+        while(!(cin >> save_result) || save_result < 0 || save_result > 1) {
+			clear_cin();
             cout << "Incorrect input, to save the final result of the model enter 1, else 0: ";
-            cin >> save_result;
         }
     }
     
@@ -575,19 +709,15 @@ void load_file() {
     if(save_state == 1 || save_result == 1) {
         cout << "Output filename: ";
         cin >> output_filename;
-        while(output_filename.size() <= 0) {
-            cout << "Incorrect input, please enter a valid filename: ";
-            cin >> output_filename;
-        }
     }
     
     //Asks for the DSAA surfer grid filenmae
     cout << "Surfer filename: ";
-    cin >> output_su_filename;
-    while(output_su_filename.size() <= 0) {
-        cout << "Incorrect input, please enter a valid filename: ";
-        cin >> output_su_filename;
-    }
+    while(!(cin >> output_su_filename) || output_su_filename.length() < 5) {
+		clear_cin();
+		cout << "Please enter a filename at least 5 characters in length: ";
+	}
+
     
     //Loads the input file
     cout << endl << endl << "Loading Input File";
@@ -621,6 +751,9 @@ void load_file() {
     dim_x = new REAL[num_cols];
     dim_y = new REAL[num_rows];
     dim_z = new REAL[num_slices];
+    dist_x = new REAL[num_cols];
+    dist_y = new REAL[num_rows];
+    dist_z = new REAL[num_slices];
     temp = new REAL**[num_rows];
     next_temp = new REAL**[num_rows];
     cond_codes = new int**[num_rows];
@@ -715,32 +848,49 @@ void load_file() {
     for(int i = 0; i < num_cols; i++) {
         source_file >> dim_x[i];
         if(i == 0) {
-            min_col_dim = dim_x[i];
+            min_col_dim = dim_x[0];
+            dist_x[0] = dim_x[0]/2.0;
         }
-        else if(dim_x[i] < min_col_dim) {
-            min_col_dim = dim_x[i];
+        else {
+            if(dim_x[i] < min_col_dim) {
+                min_col_dim = dim_x[i];
+            }
+            dist_x[i] = dist_x[i-1] + dim_x[i-1]/2.0 + dim_x[i]/2.0;
         }
     }
+    max_dist_x = dist_x[num_cols-1] + dim_x[num_cols-1]/2.0;
 
     //Reads in the X (row) dimensions and finds the minimum row distance
     for(int i = 0; i < num_rows; i++) {
         source_file >> dim_y[i];
         if(i == 0) {
             min_row_dim = dim_y[i];
+            dist_y[0] = dim_y[0]/2.0;
         }
-        else if(dim_y[i] < min_row_dim) {
-            min_row_dim = dim_y[i];
+        else {
+            if(dim_y[i] < min_row_dim) {
+                min_row_dim = dim_y[i];
+            }
+            dist_y[i] = dist_y[i-1] + dim_y[i-1]/2.0 + dim_y[i]/2.0;
         }
     }
+    max_dist_y = dist_y[num_rows-1] + dim_y[num_rows-1]/2.0;
 
     //Reads in the Z (slice depth) dimension and finds the minimum row distance
     for (int i = 0; i < num_slices; i++) {
         source_file >> dim_z[i];
-        if (i == 0) 
+        if (i == 0) {
             min_slice_dim = dim_z[i];
-        else if (dim_z[i] < min_slice_dim) 
-            min_slice_dim = dim_z[i];
+            dist_z[0] = dim_z[0]/2.0;
+        }
+        else {
+            if (dim_z[i] < min_slice_dim) {
+                min_slice_dim = dim_z[i];
+            }
+            dist_z[i] = dist_z[i-1] + dim_z[i-1]/2.0 + dim_z[i]/2.0;
+        }
     }
+    max_dist_z = dist_z[num_slices-1] + dim_z[num_slices-1]/2.0;
 
     //Reads in the conduction heat production values
     source_file >> num_hp;
@@ -862,7 +1012,7 @@ void save_model_state() {
     else {
         //Prints the simulation parameters to the output file
         output_file << setw(20) << num_rows << " " << setw(20) << num_cols << " " << setw(20) << num_slices << setw(20) << using_convection << endl;
-        output_file << setw(20) << fixed << setprecision(2) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
+        output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
         output_file << title << endl;
         
         output_file << setprecision(OUT_PRECISION);
@@ -969,7 +1119,6 @@ void save_model_state() {
         }
         
         //Closes the output file
-
         output_file.close();
     }
 }
@@ -1065,43 +1214,43 @@ void save_surfer() {
  * Calculates and returns the heat flow per year between two cells in the X direction
  * based on the provided indexes
  */
-REAL cond_add_x(int x1, int y1, int z1, int x2, int y2, int z2) {
+REAL cond_add_x(int row1, int col1, int slice1, int row2, int col2, int slice2) {
     REAL temp_diff;    //Temperature difference between the two cells
     REAL ad;           //
     
-    temp_diff = temp[x1][y2][z1] - temp[x1][y1][z1];
-    ad = dim_x[y2]/thermal_conduct_diff[cond_tc_index[x1][y2][z1]] + dim_x[y1]/thermal_conduct_diff[cond_tc_index[x1][y1][z1]];
+    temp_diff = temp[row1][col2][slice1] - temp[row1][col1][slice1];
+    ad = dim_x[col2]/thermal_conduct_diff[cond_tc_index[row1][col2][slice1]] + dim_x[col1]/thermal_conduct_diff[cond_tc_index[row1][col1][slice1]];
     
-    return 2*temp_diff/(ad*dim_x[y1]);
+    return 2*temp_diff/(ad*dim_x[col1]);
 }
 
 /**
  * Calculates and returns the heat flow per year between two cells in the Y direction
  * based on the provided indexes
  */
-REAL cond_add_y(int x1, int y1, int z1, int x2, int y2, int z2) {
+REAL cond_add_y(int row1, int col1, int slice1, int row2, int col2, int slice2) {
     REAL temp_diff;    //Temperature difference between the two cells
     REAL ad;           //
     
-    temp_diff = temp[x2][y1][z1] - temp[x1][y1][z1];
-    ad = dim_y[x2]/thermal_conduct_diff[cond_tc_index[x2][y1][z1]] + dim_y[x1]/thermal_conduct_diff[cond_tc_index[x1][y1][z1]];
+    temp_diff = temp[row2][col1][slice1] - temp[row1][col1][slice1];
+    ad = dim_y[row2]/thermal_conduct_diff[cond_tc_index[row2][col1][slice1]] + dim_y[row1]/thermal_conduct_diff[cond_tc_index[row1][col1][slice1]];
     
-    return 2*temp_diff/(ad*dim_y[x1]);
+    return 2*temp_diff/(ad*dim_y[row1]);
 }
 
 /**
  * Calculates and returns the heat flow per year between two cells in the Z direction
  * based on the provided indexes
  */
-REAL cond_add_z(int x1, int y1, int z1, int x2, int y2, int z2) {
+REAL cond_add_z(int row1, int col1, int slice1, int row2, int col2, int slice2) {
     if(num_slices == 1) {
         return 0.0;
     }
     REAL temp_diff;
     REAL ad;
-    temp_diff = temp[x1][y1][z2] - temp[x1][y1][z1];
-    ad = dim_z[z2]/thermal_conduct_diff[cond_tc_index[x1][y1][z2]] + dim_z[z1]/thermal_conduct_diff[cond_tc_index[x1][y1][z1]];
-    return 2*temp_diff/(ad*dim_z[z1]);
+    temp_diff = temp[row1][col1][slice2] - temp[row1][col1][slice1];
+    ad = dim_z[slice2]/thermal_conduct_diff[cond_tc_index[row1][col1][slice2]] + dim_z[slice1]/thermal_conduct_diff[cond_tc_index[row1][col1][slice1]];
+    return 2*temp_diff/(ad*dim_z[slice1]);
 }
 
 /**
@@ -1201,52 +1350,31 @@ void conduction(){
 /**
  * Performs convection between two specified cells
  */
-void perform_convection(int x1, int y1, int z1, int x2, int y2, int z2) {
-    REAL avg_x_dim;    //Average X dimension for the two cells
-    REAL avg_y_dim;    //Average Y dimension for the two cells
-    REAL avg_z_dim;    //Average Z dimension for the two cells
+void perform_convection(int row1, int col1, int slice1, int row2, int col2, int slice2) {
+    REAL avg_x_dim;    //distance between two temperature cells in the x direction
+    REAL avg_y_dim;    //distance between two temperature cells in the y direction
+    REAL avg_z_dim;    //distance between two temperature cells in the z direction
     REAL amt;          //
     REAL dist;         //Distance between the two cells
     REAL ratio;        //Ratio of amt to distance
     
     //Checks if the specified cell is within the bounds of the simulation and if it has a high enough
     //temperature to perform convection
-    if((x2 >= 0) && (x2 < num_rows) && (y2 >= 0) && (y2 < num_cols) && (z2 >= 0) && (z2 < num_slices) && (temp[x2][y2][z2] - min_temp_conv[conv_min_temp_index[x1][y1][z1]] >= 0)) {
-        if(z1 == z2) {
-            avg_x_dim = (dim_x[y2] + dim_x[y1])/2.0;
-            avg_y_dim = (dim_y[x2] + dim_y[x1])/2.0;
-            avg_z_dim = 0;
-        }
-        else {
-            if((x1 == x2) && (y1 == y2)) {
-                avg_x_dim = 0;
-                avg_y_dim = 0;
-            }
-            else if(x1 == x2) {
-                avg_x_dim = 0;
-                avg_y_dim = (dim_y[x2] + dim_y[x1])/2.0;
-            }
-            else if(y1 == y2) {
-                avg_x_dim = (dim_x[y2] + dim_x[y1])/2.0;
-                avg_y_dim = 0;
-            }
-            else {
-                avg_x_dim = (dim_x[y2] + dim_x[y1])/2.0;
-                avg_y_dim = (dim_y[x2] + dim_y[x1])/2.0;
-            }
-            avg_z_dim = (dim_z[z2] + dim_z[z1])/2.0;
-        }
+    if((row2 >= 0) && (row2 < num_rows) && (col2 >= 0) && (col2 < num_cols) && (slice2 >= 0) && (slice2 < num_slices) && (temp[row2][col2][slice2] - min_temp_conv[conv_min_temp_index[row1][col1][slice1]] >= 0)) {
+        avg_x_dim = dist_x[col1] - dist_x[col2];
+        avg_y_dim = dist_y[row1] - dist_y[row2];
+        avg_z_dim = dist_z[slice1] - dist_z[slice2];
 
-        amt = (vel[conv_vel_index[x1][y1][z1]]*heat_capac_fluid[conv_fluid_index[x1][y1][z1]]/heat_capac_rock[conv_rock_index[x1][y1][z1]])*time_inc;
+        amt = (vel[conv_vel_index[row1][col1][slice1]]*heat_capac_fluid[conv_fluid_index[row1][col1][slice1]]/heat_capac_rock[conv_rock_index[row1][col1][slice1]])*time_inc;
         dist = sqrt(avg_x_dim*avg_x_dim + avg_y_dim*avg_y_dim + avg_z_dim*avg_z_dim);
         ratio = amt/dist;
         if(ratio > 1) {
             ratio = 0.999999;
         }
-        next_temp[x1][y1][z1] = temp[x1][y1][z1] + ratio *(temp[x2][y2][z2]-temp[x1][y1][z1]);
+        next_temp[row1][col1][slice1] = temp[row1][col1][slice1] + ratio *(temp[row2][col2][slice2]-temp[row1][col1][slice1]);
     }
     else {
-        next_temp[x1][y1][z1] = temp[x1][y1][z1];
+        next_temp[row1][col1][slice1] = temp[row1][col1][slice1];
     }
 }
 
@@ -1372,6 +1500,122 @@ void convection() {
 }
 
 /**
+ * Finds and returns the maximum temperature difference between
+ * the current and next temperature arrays.
+ */
+REAL find_max_temp_diff() {
+    REAL max_diff = fabs(next_temp[0][0][0] - temp[0][0][0]);
+    REAL diff = 0.0;
+    for(int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                diff = fabs(next_temp[i][j][k] - temp[i][j][k]);
+                if(diff > max_diff) {
+                    max_diff = diff;
+                }
+            }
+        }
+    }
+    return max_diff;
+}
+
+/**
+ * Finds the index of a given x, y, and z value in meters and
+ * stores them in the index array
+ */
+void find_loc_index(REAL x_loc, REAL y_loc, REAL z_loc, int *index){
+	if(x_loc < 0) {
+		index[0] = -1;
+	}
+	else if(x_loc > max_dist_x) {
+		index[0] = num_cols;
+	}
+	else {
+		for(index[0] = 0; index[0] < num_cols; index[0]++) {
+			if(x_loc <= dist_x[index[0]]+dim_x[index[0]]/2.0) {
+				break;
+			}
+		}
+	}
+
+	if(y_loc < 0) {
+		index[1] = -1;
+	}
+	else if(y_loc > max_dist_y) {
+		index[1] = num_rows;
+	}
+	else {
+		for(index[1] = 0; index[1] < num_rows; index[1]++) {
+			if(y_loc <= dist_y[index[1]]+dim_y[index[1]]/2.0) {
+				break;
+			}
+		}
+	}
+
+	if(z_loc < 0) {
+		index[2] = -1;
+	}
+	else if(z_loc > max_dist_z) {
+		index[2] = num_slices;
+	}
+	else {
+		for(index[2] = 0; index[2] < num_slices; index[2]++) {
+			if(z_loc <= dist_x[index[2]]+dim_x[index[2]]/2.0) {
+				break;
+			}
+		}
+	}
+	
+}
+
+
+/**
+ * Finds the indexes of two corners of the moving source
+ * if either falls within the model. The valid parts of the
+ * moving source are updated with the moving sources temperature
+ */
+void update_mvsrc(int index) {
+    if(mvsrc_valid[index] == 1) {
+        int loc_index[3], loc_offset_index[3];
+        find_loc_index(mvsrc_x[index],mvsrc_y[index],mvsrc_z[index],loc_index);
+        find_loc_index(mvsrc_x[index]+mvsrc_offset_x[index],mvsrc_y[index]+mvsrc_offset_y[index],mvsrc_z[index]+mvsrc_offset_z[index],loc_offset_index);
+
+        if((loc_index[0] >= 0 && loc_index[0] < num_cols && loc_index[1] >= 0 && loc_index[1] < num_rows && loc_index[2] >= 0 && loc_index[2] < num_slices) || (loc_offset_index[0] >= 0 && loc_offset_index[0] < num_cols && loc_offset_index[1] >= 0 && loc_offset_index[1] < num_rows && loc_offset_index[2] >= 0 && loc_offset_index[2] < num_slices)) {
+            for(int k = loc_index[2]; k <=  loc_offset_index[2]; k++) {
+                for(int i = loc_index[1]; i <=  loc_offset_index[1]; i++) {
+                    for(int j = loc_index[0]; j <=  loc_offset_index[0]; j++) {
+                        if(i >= 0 && i < num_rows && j >= 0 && j < num_cols && k >= 0 && k < num_slices) {
+                            temp[i][j][k] = mvsrc_temp[index];
+                        }
+                    }
+                }
+            }
+        }
+        else {
+            mvsrc_valid[index] = 0;
+        }
+    }
+}
+
+/**
+ * Updates the moving sources velocity and position vectors
+ * then updates the temperatures in the current temp array
+ */
+void update_moving_sources() {
+    for(int i = 0; i < num_mvsrc; i++) {
+        mvsrc_vel_x[i] += mvsrc_accel_x[i]*time_step;
+        mvsrc_vel_y[i] += mvsrc_accel_y[i]*time_step;
+        mvsrc_vel_z[i] += mvsrc_accel_z[i]*time_step;
+
+        mvsrc_x[i] += mvsrc_vel_x[i]*time_step;
+        mvsrc_y[i] += mvsrc_vel_y[i]*time_step;
+        mvsrc_z[i] += mvsrc_vel_z[i]*time_step;
+
+        update_mvsrc(i);
+    }
+}
+
+/**
  * Performs a finite heat flow simulation using
  * conduction and convection.
  */
@@ -1382,7 +1626,8 @@ int main(int argc, char **argv) {
         cerr << "Cannot continue. " << argv[0] << " is not the correct number of arguments. Please pass <window width>, <window height>, <window depth>" << endl;
         exit(0);
     }
-	
+
+	cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
     window_width = atoi(argv[1]);
     window_height = atoi(argv[2]);
 	window_depth = atoi(argv[3]);
@@ -1391,17 +1636,17 @@ int main(int argc, char **argv) {
 
 	//Asks the user if they wish to visualize results
     cout << endl << "Press 1 to run visualization, otherwise 0: ";
-    cin >> display_mode;
-    while(display_mode < 0 || display_mode > 1) {
+    while(!(cin >> display_mode) || display_mode < 0 || display_mode > 1) {
+		clear_cin();
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
-        cin >> display_mode;
     }
+#else
+	cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
 #endif
-
     int input_val;    //Temporary int value
     REAL temp_val;    //Temporary REAL value
     
-    cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
+    
     
     //Loads the input file for the simulation
     load_file();
@@ -1411,10 +1656,9 @@ int main(int argc, char **argv) {
      * within the model
      */
     cout << endl << endl << "To Change the Temp. on a Block, Enter 1, Else 0: ";
-    cin >> input_val;
-    while(!(input_val == 0 || input_val == 1)) {
+    while(!(cin >> input_val) || input_val < 0 || input_val > 1) {
+		clear_cin();
         cout << "Incorrect Input, Enter 1 to Change, Else 0: ";
-        cin >> input_val;
     }
     
     //Warning, the row column pairs need to be space seperated not comma seperated  
@@ -1422,23 +1666,37 @@ int main(int argc, char **argv) {
         int num_block, row1, row2, col1, col2, slice1, slice2;
         REAL new_temp;
         cout << "Enter the Number of Blocks to Change: ";
-        cin >> num_block;
+        while(!(cin >> num_block) || num_block < 0) {
+            clear_cin();
+			cout << "Enter a number greater than or equal to 0: ";
+		}
         for(int i = 0; i < num_block; i++) {
             cout << endl << "Block " << i << endl;
             cout << "Enter the Coordinates of the Upper Left Corner <row> <column> <slice>: ";
-            cin >> row1 >> col1 >> slice1;
+			while(!(cin >> row1 >> col1 >> slice1) || row1 < 0 || col1 < 0 || slice1 < 0) {
+                clear_cin();
+				cout << "Incorrect input, enter three positive numbers with spaces: ";
+			}
             cout << "Enter the Coordinates of the Lower Right Corner <row> <column> <slice>: ";
-            cin >> row2 >> col2 >> slice2;
+            while(!(cin >> row2 >> col2 >> slice2) || row2 < row1 || col2 < col1 || slice2 < slice1) {
+                clear_cin();
+				cout << "Incorrect input, enter three positive numbers with spaces: ";
+			}
             cout << endl << "Current Block Temps" << endl;
             cout << setw(10) << "row" << " " << setw(10) << "col" << " " << setw(10) << "slice" << " " << setw(OUT_PRECISION+5) << "temp" << endl;
             cout << setw(10) << row1 << " " << setw(10) << col1 << " " << setw(10) << slice1 << setw(OUT_PRECISION+5) << fixed << setprecision(OUT_PRECISION) << temp[row1][col1][slice1] << endl;
             cout << setw(10) << row2 << " " << setw(10) << col2 << " " << setw(10) << slice2 << setw(OUT_PRECISION+5) << temp[row2][col2][slice2] << endl;
             cout << "Enter a New Temperature For the Block: ";
-            cin >> new_temp;
+            while(!(cin >> new_temp)) {
+                clear_cin();
+                cout << "Incorrect input, enter a new temperature: ";
+            }
             for(int i = row1; i < row2; i++) {
                 for(int j = col1; j < col2; j++) {
                     for(int k = slice1; k < slice2; k++) {
-                        temp[i][j][k] = new_temp;
+                        if(i >= 0 && i < num_rows && j >= 0 && j < num_cols && k >= 0 && k < num_slices) {
+                            temp[i][j][k] = new_temp;
+                        }
                     }
                 }
             }
@@ -1446,33 +1704,94 @@ int main(int argc, char **argv) {
     }
     
     /**
-     * Allows the user to start a moving source.
-     * the only direction currently implemented is from left to right and
-     * the move is made per iteration. Needs to be updated to
-     * allow for multidirectional movement and better velocity control
-     *       ** NOTE THAT THIS CURRENTLY ONLY AFFECTS THE FIRST SLICE (ie, there's no 3d moving source) **
+     * Allows the user to start one or more moving sources.
      */
-    cout << endl << endl << "To Start a Moving Source Enter 1, Else Enter 0: ";
-    cin >> using_moving_source;
-    while(!(using_moving_source == 0 || using_moving_source == 1)) {
+    cout << endl << endl << "To Start One or More Moving Sources Enter 1, Else Enter 0: ";
+    while(!(cin >> using_moving_source) || using_moving_source < 0 || using_moving_source > 1) {
+        clear_cin();
         cout << "Incorrect Input, Enter 1 to Change, Else 0: ";
-        cin >> using_moving_source;
     }
     if(using_moving_source == 1) {
-        cout << "Enter Starting and Ending Columns: ";
-        cin >> mvsrc_start_col >> mvsrc_end_col;
-        cout << "Maximum Depth is " << (int)num_rows*dim_y[0] << " Meters" << endl;
-        cout << "Enter the Depth to Source in Meters: ";
-        cin >> mvsrc_depth;
-        mvsrc_depth  = (int)(mvsrc_depth/dim_y[0]);
-        cout << "Enter the Temperature of the Moving Source: ";
-        cin >> mvsrc_temp;
+        REAL mag, angle1, angle2;
+        cout << "Enter the number of moving sources: ";
+        while(!(cin >> num_mvsrc) || num_mvsrc <= 0) {
+            clear_cin();
+            cout << "Incorrect input, enter a number greater than 0: ";
+        }
+        mvsrc_x = new REAL[num_mvsrc];
+        mvsrc_y = new REAL[num_mvsrc];
+        mvsrc_z = new REAL[num_mvsrc];
+        mvsrc_offset_x = new REAL[num_mvsrc];
+        mvsrc_offset_y = new REAL[num_mvsrc];
+        mvsrc_offset_z = new REAL[num_mvsrc];
+        mvsrc_vel_x = new REAL[num_mvsrc];
+        mvsrc_vel_y = new REAL[num_mvsrc];
+        mvsrc_vel_z = new REAL[num_mvsrc];
+        mvsrc_accel_x = new REAL[num_mvsrc];
+        mvsrc_accel_y = new REAL[num_mvsrc];
+        mvsrc_accel_z = new REAL[num_mvsrc];
+        mvsrc_temp = new REAL[num_mvsrc];
+        mvsrc_valid = new int[num_mvsrc];
+        for(int i = 0; i < num_mvsrc; i++) {
+            cout << endl << "Moving source " << i << endl;
+            cout << "Enter the coordinates in meters for the corner closest to the origin, <x> <y> <z>: ";
+            while(!(cin >> mvsrc_x[i] >> mvsrc_y[i] >> mvsrc_z[i]) || mvsrc_x[i] < 0 || mvsrc_x[i] > max_dist_x || mvsrc_y[i] < 0 || mvsrc_y[i] > max_dist_y || mvsrc_z[i] < 0 || mvsrc_z[i] > max_dist_z) {
+                clear_cin();
+                cout << "Incorrect input, enter a valid coordinate between x=0-"<<max_dist_x<<" y=0-"<<max_dist_y<<" z=0-"<<max_dist_z<<":";
+            }
+            cout << "Enter the size of the moving source in meters, <x size> <y size> <z size>: ";
+            while(!(cin >> mvsrc_offset_x[i] >> mvsrc_offset_y[i] >> mvsrc_offset_z[i]) || mvsrc_offset_x[i] <= 0 || mvsrc_offset_x[i] > max_dist_x-mvsrc_x[i] || mvsrc_offset_y[i] <= 0 || mvsrc_offset_y[i] > max_dist_y-mvsrc_y[i] || mvsrc_offset_z[i] <= 0 || mvsrc_offset_z[i] > max_dist_z-mvsrc_z[i]) {
+                clear_cin();
+                cout << "Incorrect input, enter a valid distance between x=0-"<<max_dist_x-mvsrc_x[i]<<" y=0-"<<max_dist_y-mvsrc_y[i]<<" z=0-"<<max_dist_z-mvsrc_z[i]<<":";
+            }
+            cout << "Enter the angle of the moving sources vector in degrees from positve x towards negative y: ";
+            while(!(cin >> angle1) || angle1 < 0 || angle1 > 360) {
+                clear_cin();
+                cout << "Incorrect input, enter a valid angle: ";
+            }
+            cout << "Enter the angle of the moving sources vector in degrees from positve z: ";
+            while(!(cin >> angle2) || angle2 < 0 || angle2 > 180) {
+                clear_cin();
+                cout << "Incorrect input, enter a valid angle: ";
+            }
+            cout << "Enter the magnitude of the velocity vector in m/year: ";
+            while(!(cin >> mag) || mag < 0) {
+                clear_cin();
+                cout << "Incorrect input, enter a velocity greater than 0: ";
+            }
+            mvsrc_vel_x[i] = mag*sin(angle2/180.0*M_PI)*cos(angle1/180.0*M_PI);
+            mvsrc_vel_y[i] = mag*sin(angle2/180.0*M_PI)*sin(angle1/180.0*M_PI);
+            mvsrc_vel_z[i] = mag*cos(angle2/180.0*M_PI);
+
+            cout << "Enter the magnitude of the acceleration vector in m/year^2: ";
+            while(!(cin >> mag) || mag < 0) {
+                clear_cin();
+                cout << "Incorrect input, enter an acceleration greater than 0: ";
+            }
+            mvsrc_accel_x[i] = mag*sin(angle2/180.0*M_PI)*cos(angle1/180.0*M_PI);
+            mvsrc_accel_y[i] = mag*sin(angle2/180.0*M_PI)*sin(angle1/180.0*M_PI);
+            mvsrc_accel_z[i] = mag*cos(angle2/180.0*M_PI);
+            
+            cout << "Enter the temperature of the moving source: ";
+            while(!(cin >> mag)) {
+                clear_cin();
+                cout << "Incorrect input, enter a valid temperature: ";
+            }
+            mvsrc_temp[i] = mag;
+
+            mvsrc_valid[i] = 1;
+
+            update_mvsrc(i);
+        }
     }
     
     //Allows the user to decrease the size of the time step
     cout << endl << endl << "Each Iteration in Time Spans " << scientific << time_step << " Years" << endl;
     cout << "Enter a Shorter Iteration Time in Years if Desired (any larger number otherwise): ";
-    cin >> temp_val;
+    while(!(cin >> temp_val) || temp_val <= 0) {
+        clear_cin();
+        cout << "Incorrect input, enter a number greater than 0: ";
+    }
     if(temp_val < time_step) {
         time_step = temp_val;
     }
@@ -1501,11 +1820,30 @@ int main(int argc, char **argv) {
     thermal_time_constant = min_row_dim*min_row_dim/max_thermal_conduct_diff;
     cout << endl << endl << "The Thermal Time Constant for the Vertical Dimension is " << thermal_time_constant << " Years" << endl;
     cout << "Enter Time Duration for Calculation in Years: ";
-    cin >> run_time;
+    while(!(cin >> run_time) || run_time <= 0) {
+        clear_cin();
+        cout << "Incorrect input, enter a number greater than 0: ";
+    }
     
     //Asks the user for the number of loops to perform between screen updates
     cout << endl << endl << "Enter the Number of Loops Between Screen Updates: ";
-    cin >> num_loops;
+    while(!(cin >> num_loops) || num_loops <= 0) {
+        clear_cin();
+        cout << "Incorrect input, enter a number greater than 0: ";
+    }
+    
+    cout << endl << endl << "To have the simulation stop once the temperature change meets a tolerance, Enter 1 otherwise 0: ";
+    while(!(cin >> use_tolerance) || use_tolerance < 0 || use_tolerance > 1) {
+        clear_cin();
+        cout << "Incorrect Input, Enter 1 to use a tolerance, Else 0: ";
+    }
+    if(use_tolerance == 1) {
+        cout << endl << "Enter the tolerance: ";
+        while(!(cin >> tolerance) || tolerance  <= 0) {
+            clear_cin();
+            cout << "Incorrect input, enter a number greater than 0: ";
+        }
+    }
     
     //Initializes the simulation time to 0.0
     sim_time = 0.0;
@@ -1515,6 +1853,18 @@ int main(int argc, char **argv) {
     cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
     PressEnterToContinue();
     
+    /**
+     * The main loop of the simulation
+     */
+    count = 0;    //Number of loops performed
+    cout << endl << endl << num_loops << " loops between screen updates" << endl << endl;
+    if(use_tolerance == 0) {
+        cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << endl;
+    }
+    else {
+        cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << setw(20) << "Max temp diff" << endl;
+    }
+
 #ifdef DISPLAY
 	array_minmax();
 	array_size = num_cols * num_rows * num_slices;
@@ -1556,28 +1906,18 @@ int main(int argc, char **argv) {
 	gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
 	glutMainLoop();
 #else
-	/**
-     * The main loop of the simulation
-     */
-    count = 0;    //Number of loops performed
-    cout << endl << endl << num_loops << " loops between screen updates" << endl << endl;
-    cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << endl;
     while(sim_time <= run_time) {
         //Displays status information for the current loop
         if(count%num_loops == 0) {
-            cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
-            
+            if(use_tolerance == 0) {
+		        cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
+            }
+            else {
+                cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << setw(20) << max_temp_diff << endl;
+            }
             //Saves the current state of the simulation if the save_state flag is set
             if(save_state) {
                 save_model_state();
-            }
-        }
-        
-        //Updates the moving source
-        if(using_moving_source) {
-            if(mvsrc_start_col < mvsrc_end_col) {
-                mvsrc_start_col++;
-                temp[mvsrc_depth][mvsrc_start_col][0] = mvsrc_temp;
             }
         }
         
@@ -1592,6 +1932,19 @@ int main(int argc, char **argv) {
         //Increments the simulation time and loop count
         sim_time += time_step;
         count++;
+        
+        if(use_tolerance == 1) {
+            max_temp_diff = find_max_temp_diff();
+            if(max_temp_diff < tolerance) {
+                cout << "Maximum temperature change below the tolerance, stoping the simulation" << endl;
+                break;
+            }
+        }
+
+        //Updates the moving source
+        if(using_moving_source == 1) {
+		    update_moving_sources();
+        }
     }
 
     //Saves the final result of the simulation
@@ -1605,56 +1958,5 @@ int main(int argc, char **argv) {
     PressEnterToContinue();
 #endif
 
-    //Deletes allocated memory
-    for(int i = 0; i < num_rows; i++) {
-        for(int j = 0; j < num_cols; j++) {
-            delete[] temp[i][j];
-            delete[] next_temp[i][j];
-            delete[] cond_codes[i][j];
-            delete[] cond_hp_index[i][j];
-            delete[] cond_tc_index[i][j];
-            if(using_convection) {
-                delete[] conv_codes[i][j];
-                delete[] conv_min_temp_index[i][j];
-                delete[] conv_direction[i][j];
-                delete[] conv_vel_index[i][j];
-                delete[] conv_fluid_index[i][j];
-                delete[] conv_rock_index[i][j];
-            }
-        }
-        delete[] temp[i];
-        delete[] next_temp[i];
-        delete[] cond_codes[i];
-        delete[] cond_hp_index[i];
-        delete[] cond_tc_index[i];
-        if(using_convection) {
-            delete[] conv_codes[i];
-            delete[] conv_min_temp_index[i];
-            delete[] conv_direction[i];
-            delete[] conv_vel_index[i];
-            delete[] conv_fluid_index[i];
-            delete[] conv_rock_index[i];
-        }
-    }
-    delete[] dim_x;
-    delete[] dim_y;
-    delete[] temp;
-    delete[] next_temp;
-    delete[] cond_codes;
-    delete[] cond_hp_index;
-    delete[] cond_tc_index;
-    delete[] heat_production_values;
-    delete[] thermal_conduct_diff;
-    if(using_convection) {
-        delete[] conv_codes;
-        delete[] conv_min_temp_index;
-        delete[] conv_direction;
-        delete[] conv_vel_index;
-        delete[] conv_fluid_index;
-        delete[] conv_rock_index;
-        delete[] heat_capac_fluid;
-        delete[] heat_capac_rock;
-        delete[] min_temp_conv;
-        delete[] vel;
-    }
+   deallocate_memory();
 }
