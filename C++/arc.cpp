@@ -2,22 +2,24 @@
  * Performs a finite difference heat flow 
  * simulation using conduction and convection.
  */
-#define _USE_MATH_DEFINES
+
 #ifdef _WIN32
+#define _USE_MATH_DEFINES
 #define NOMINMAX //FYI need to disable min/max macro in windows.h
 #include <windows.h>
 #endif
 
 #ifdef DISPLAY
 #ifdef __APPLE__
-#  include <OpenGL/gl.h>
-#  include <OpenGL/glu.h>
-#  include <GLUT/glut.h>
+#	include <OpenGL/gl.h>
+#	include <OpenGL/glu.h>
+#	include <GLUT/glut.h>
 #else
-#  include <GL/GL.h>
-#  include <GL/GLU.h>
-#  include <GL/glut.h>
+#	include <GL/GL.h>
+#	include <GL/GLU.h>
+#	include <GL/glut.h>
 #endif
+#	include "GL/freeglut.h"
 #endif
 
 #include <iostream>
@@ -332,7 +334,7 @@ void jet_color_set(int x, int y, int z) {
 
 
 //Cube dimensions hardcoded to 1
-//From Robert Bergmans voxel display code
+//Originally from Robert Bergmans voxel display code
 void draw_cube(int x, int y, int z) {
 	if(z == current_slice) {
 		transparency = 1.0;
@@ -418,6 +420,137 @@ void draw_temp_map() {
 	}
 }
 
+//Draw all HUD/Overlay graphics. Quads for temp scale are hardcoded to Jet color map. Any new color map will require changes.
+void displayOverlay(){	
+	int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
+	int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
+    
+	glMatrixMode( GL_PROJECTION );
+    glPushMatrix();
+        glLoadIdentity();
+        glOrtho(0.0f,windowWidth,windowHeight,0.0f,0.0f,1.0f);
+
+        glMatrixMode( GL_MODELVIEW );
+        glPushMatrix();
+            glLoadIdentity();
+			glBegin( GL_QUADS );
+
+				glColor3f( 0.0f, 0.0f, 1.0f );
+                glVertex2f( windowWidth/2-75, 20.0f );
+                glVertex2f( windowWidth/2-45, 20.0f );
+                glVertex2f( windowWidth/2-45, 50.0f );
+                glVertex2f( windowWidth/2-75, 50.0f );
+
+				glColor3f( 0.0f, 1.0f, 1.0f );
+                glVertex2f( windowWidth/2-45, 20.0f );
+                glVertex2f( windowWidth/2-15, 20.0f );
+                glVertex2f( windowWidth/2-15, 50.0f );
+                glVertex2f( windowWidth/2-45, 50.0f );
+
+				glColor3f( 0.0f, 1.0f, 0.0f );
+                glVertex2f( windowWidth/2-15, 20.0f );
+                glVertex2f( windowWidth/2+15, 20.0f );
+                glVertex2f( windowWidth/2+15, 50.0f );
+                glVertex2f( windowWidth/2-15, 50.0f );
+
+				glColor3f( 1.0f, 1.0f, 0.0f );
+                glVertex2f( windowWidth/2+15, 20.0f );
+                glVertex2f( windowWidth/2+45, 20.0f );
+                glVertex2f( windowWidth/2+45, 50.0f );
+                glVertex2f( windowWidth/2+15, 50.0f );
+
+				glColor3f( 1.0f, 0.0f, 0.0f );
+                glVertex2f( windowWidth/2+45, 20.0f );
+                glVertex2f( windowWidth/2+75, 20.0f );
+                glVertex2f( windowWidth/2+75, 50.0f );
+                glVertex2f( windowWidth/2+45, 50.0f );
+
+            glEnd();
+        glPopMatrix();
+		glPushMatrix();
+			glLoadIdentity();
+			ostringstream str1;
+
+			str1 << "Min Temp <                                          > Max Temp";
+			glColor3f(1.0f, 1.0f, 1.0f); 
+			glRasterPos2f(windowWidth/2-150,35.0f);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+			str1.str("");
+			str1.clear();
+			
+			str1 << setw(4) << min_temp;
+			glRasterPos2f(windowWidth/2-100, 65.0f);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+			str1.str("");
+			str1.clear();
+
+			str1 << setw(4) << (max_temp+min_temp)/2;
+			glRasterPos2f(windowWidth/2-20, 65.0f);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+			str1.str("");
+			str1.clear();
+
+
+			str1 << setw(4) << max_temp;
+			glRasterPos2f(windowWidth/2+60, 65.0f);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+			str1.str("");
+			str1.clear();
+
+
+		glPopMatrix();
+        glPushMatrix();
+            glLoadIdentity();
+            ostringstream str;
+
+			str << "Time Interval:" << endl;
+			if(using_convection) {
+				str << "Num Conv. Loops:" << endl;
+				str << "Conv. Time Interval:" << endl;
+			}
+
+			str << endl << "Loop Total:" << endl;
+			str << "Sim Time:" << endl;
+			str << "Cum. Sim Time:" << endl << endl;
+		
+			str << "Model Dimensions:" << endl;
+			str << "Current Slice:" << endl;
+			str << "CHF:" << endl;
+			
+			glColor3f(1.0f, 1.0f, 1.0f); 
+			glRasterPos2f(10.0f,windowHeight*3.0/4.0);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
+		
+
+			str.str("");
+			str.clear();
+		
+			str << setprecision(4) << scientific;
+			str << time_step << endl;
+			if(using_convection) {
+				str << time_inc << endl;
+				str << num_conv_loops << endl;
+			}
+
+			str << endl << count << endl;
+			str << sim_time << endl;
+			str << initial_time + sim_time << endl << endl;
+			
+			str << num_rows << " X " << num_cols << " X " << num_slices << endl;
+			str << current_slice+1 << endl;
+			str << chf << endl;
+			
+			glColor3f(1.0f, 1.0f, 1.0f); 
+			glRasterPos2f(150.0f,windowHeight*3.0/4.0);
+			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
+		            
+        glPopMatrix();
+
+    glMatrixMode( GL_PROJECTION );
+    glPopMatrix();
+}
+
+
 void display() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
@@ -471,6 +604,8 @@ void display() {
 	glEnd();
 
 	draw_temp_map();
+
+	displayOverlay();
 
 	glutSwapBuffers();
 	glutPostRedisplay();
@@ -606,7 +741,7 @@ void mouse_move(int x, int y) {
 
 void keyboard(unsigned char key, int x, int y) {
 	switch(key) {
-		case '-':
+		case 'w':
 			if(current_slice > 0) {
 				current_slice--;
 				//camera_trans[1]-=0.5;
@@ -617,7 +752,7 @@ void keyboard(unsigned char key, int x, int y) {
 				gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
 			}
 			break;
-		case '+':
+		case 's':
 			if(current_slice < num_slices-1) {
 				current_slice++;
 				//camera_trans[1]+=0.5;
