@@ -264,7 +264,7 @@ int current_slice = 0;
 
 /**
  *  Parameters to control the camera angle so we can move where we're looking at
- *  the simulation from with the mouse
+ *  the simulation from with the mouse. Kept for debugging.
  */
 /*
 int     ox                  = 0;
@@ -277,7 +277,9 @@ float   camera_rot_lag[]    = {0, 0, 0};
 const float inertia         = 0.1f;
 */
 
-//Sets max and min temperature values
+/*
+ * Sets max and min temperature values for simulation
+ */
 void array_minmax() {
 	min_temp=temp[0][0][0];
 	max_temp=temp[0][0][0];
@@ -293,14 +295,19 @@ void array_minmax() {
 	}
 }
 
-//3D to 1D indexing
-static int POSITION(int x, int y, int z) {
-	return (z * num_cols*num_rows) + (x*num_cols)+y;
+
+/* 
+ * 3D to 1D indexing
+ */
+static int POSITION(int x, int y) {
+	return (x*num_cols)+y;
 }
 
 
-//Colormap algorithm intended to reproduce Matlab's RGB "Jet" plate
-//Concept based on: http://paulbourke.net/texture_colour/colourspace/ (11/21/12)
+/*
+ * Colormap algorithm reproduces Matlab's RGB "Jet" plate
+ * Concept based on: http://paulbourke.net/texture_colour/colourspace/ (11/21/12)
+ */
 void jet_color_set(int x, int y, int z) {
 	REAL current_temp = temp[x][y][z];
 	REAL delta_temp = max_temp - min_temp;
@@ -311,30 +318,32 @@ void jet_color_set(int x, int y, int z) {
 		current_temp = max_temp;
 
 	if(current_temp < (min_temp + 0.25 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 0.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 4*(current_temp - min_temp)/delta_temp;
-		color_field[POSITION(x,y,z) * 3 + 2] = 1.0;
+		color_field[POSITION(x,y) * 3] = 0.0;	
+		color_field[POSITION(x,y) * 3 + 1] = 4*(current_temp - min_temp)/delta_temp;
+		color_field[POSITION(x,y) * 3 + 2] = 1.0;
 	}
 	else if(current_temp < (min_temp + 0.5 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 0.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0;	
-		color_field[POSITION(x,y,z) * 3 + 2] = 1.0 + 4 * (min_temp + 0.25 * delta_temp - current_temp) / delta_temp;
+		color_field[POSITION(x,y) * 3] = 0.0;	
+		color_field[POSITION(x,y) * 3 + 1] = 1.0;	
+		color_field[POSITION(x,y) * 3 + 2] = 1.0 + 4 * (min_temp + 0.25 * delta_temp - current_temp) / delta_temp;
 	}
 	else if(current_temp < (min_temp + 0.75 * delta_temp)) {
-		color_field[POSITION(x,y,z) * 3] = 4 * (current_temp - min_temp - 0.5 * delta_temp) / delta_temp;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0;
-		color_field[POSITION(x,y,z) * 3 + 2] = 0.0;
+		color_field[POSITION(x,y) * 3] = 4 * (current_temp - min_temp - 0.5 * delta_temp) / delta_temp;	
+		color_field[POSITION(x,y) * 3 + 1] = 1.0;
+		color_field[POSITION(x,y) * 3 + 2] = 0.0;
 	}
 	else {
-		color_field[POSITION(x,y,z) * 3] = 1.0;	
-		color_field[POSITION(x,y,z) * 3 + 1] = 1.0 + 4 * (min_temp + 0.75 * delta_temp - current_temp) / delta_temp;
-		color_field[POSITION(x,y,z) * 3 + 2] = 0.0;
+		color_field[POSITION(x,y) * 3] = 1.0;	
+		color_field[POSITION(x,y) * 3 + 1] = 1.0 + 4 * (min_temp + 0.75 * delta_temp - current_temp) / delta_temp;
+		color_field[POSITION(x,y) * 3 + 2] = 0.0;
 	}
 }
 
 
-//Cube dimensions hardcoded to 1
-//Originally from Robert Bergmans voxel display code
+/*
+ * Draw temp surface via 1x1 faces. Dimensions constant for simplicity.
+ * Originally drew cubes from Robert Bergmans voxel display code.
+ */
 void draw_cube(int x, int y, int z) {
 	if(z == current_slice) {
 		transparency = 1.0;
@@ -342,11 +351,49 @@ void draw_cube(int x, int y, int z) {
 	else {
 		transparency = 0.3;
 	}
+	glBegin(GL_TRIANGLES);
+		//front
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
+					transparency);
+		glVertex3f(0.0f,0.0f,1.0f);//5
+		glVertex3f(1.0f,0.0f,1.0f);//6
+		glVertex3f(0.0f,-1.0f,1.0f);//8
+		
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
+					transparency);
+		glVertex3f(0.0f,-1.0f,1.0f);//8
+		glVertex3f(1.0f,0.0f,1.0f);//6
+		glVertex3f(1.0f,-1.0f,1.0f);//7
+
+		//top
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
+					transparency);
+		glVertex3f(0.0f,0.0f,0.0f);//1
+		glVertex3f(1.0f,0.0f,0.0f);//2
+		glVertex3f(0.0f,0.0f,1.0f);//5
+		
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
+					transparency);
+		glVertex3f(0.0f,0.0f,1.0f);//5
+		glVertex3f(1.0f,0.0f,0.0f);//2
+		glVertex3f(1.0f,0.0f,1.0f);//6
+	
+	
+	//QUADS code left in case we need it later	
+	/*
 	glBegin(GL_QUADS);
 		//front
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(0.0f,0.0f,1.0f);//5
 		glVertex3f(1.0f,0.0f,1.0f);//6
@@ -354,19 +401,19 @@ void draw_cube(int x, int y, int z) {
 		glVertex3f(0.0f,-1.0f,1.0f);//8
 
 		//top
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(0.0f,0.0f,0.0f);//1
 		glVertex3f(1.0f,0.0f,0.0f);//2
 		glVertex3f(1.0f,0.0f,1.0f);//6
 		glVertex3f(0.0f,0.0f,1.0f);//5
 
-		/*//left
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		*//*//left
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(0.0f,0.0f,0.0f);//1
 		glVertex3f(0.0f,0.0f,1.0f);//5
@@ -374,9 +421,9 @@ void draw_cube(int x, int y, int z) {
 		glVertex3f(0.0f,-1.0f,0.0f);//4
 
 		//right
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(1.0f,0.0f,0.0f);//2
 		glVertex3f(1.0f,0.0f,1.0f);//6
@@ -384,9 +431,9 @@ void draw_cube(int x, int y, int z) {
 		glVertex3f(1.0f,-1.0f,0.0f);//3
 
 		//bottom
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(0.0f,-1.0f,0.0f);//4
 		glVertex3f(1.0f,-1.0f,0.0f);//3
@@ -394,9 +441,9 @@ void draw_cube(int x, int y, int z) {
 		glVertex3f(0.0f,-1.0f,1.0f);//8
 
 		//back
-		glColor4f(	color_field[POSITION(x,y,z) * 3],
-					color_field[POSITION(x,y,z) * 3 + 1],
-					color_field[POSITION(x,y,z) * 3 + 2],
+		glColor4f(	color_field[POSITION(x,y) * 3],
+					color_field[POSITION(x,y) * 3 + 1],
+					color_field[POSITION(x,y) * 3 + 2],
 					transparency);
 		glVertex3f(0.0f,0.0f,0.0f);//1
 		glVertex3f(1.0f,0.0f,0.0f);//2
@@ -407,20 +454,10 @@ void draw_cube(int x, int y, int z) {
 	glEnd();
 }
 
-//Set and draw temp faces
-void draw_temp_map() {
-	for(int i=0; i<num_rows; i++) {
-		for (int j=0; j<num_cols; j++) {
-			glPushMatrix();
-			glTranslatef(j,-i,current_slice);
-			jet_color_set(i,j,current_slice);
-			draw_cube(i,j,current_slice);
-			glPopMatrix();
-		}
-	}
-}
 
-//Draw all HUD/Overlay graphics. Quads for temp scale are hardcoded to Jet color map. Any new color map will require changes.
+/*
+ *Draw all HUD/Overlay graphics. Quads for temp scale are hardcoded to Jet color map. Any new color map will require changes.
+ */
 void displayOverlay(){	
 	int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
 	int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
@@ -550,16 +587,17 @@ void displayOverlay(){
     glPopMatrix();
 }
 
-
-void display() {
+/*
+ * Helper function called from display3d. Broken out for readability.
+ */
+void display_helper() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	/**
-     *  Handle the camera angle.
-     */
+
+	//  Handle the camera angle. Maintained for debugging
 	/*
     for (int c = 0; c < 3; ++c)
     {
@@ -571,6 +609,7 @@ void display() {
     glRotatef(camera_rot_lag[0], 1.0, 0.0, 0.0);
     glRotatef(camera_rot_lag[1], 0.0, 1.0, 0.0);
 	*/
+
 	//Draw the boundary lines
 	glBegin(GL_LINES);
 		glColor3f(1.0, 1.0, 1.0);
@@ -602,15 +641,25 @@ void display() {
 		glVertex3f(0,-num_rows,0);
 		glVertex3f(0,-num_rows,num_slices);
 	glEnd();
-
-	draw_temp_map();
+		for(int i=0; i<num_rows; i++) {
+		for (int j=0; j<num_cols; j++) {
+			glPushMatrix();
+			glTranslatef(j,-i,current_slice);
+			jet_color_set(i,j,current_slice);
+			draw_cube(i,j,current_slice);
+			glPopMatrix();
+		}
+	}
 
 	displayOverlay();
-
 	glutSwapBuffers();
 	glutPostRedisplay();
 }
 
+/*
+ * Main simulation call during display. Makes required simulation calls e.g.- for convection, etc. 
+ * Makes call to display helper function
+ */
 void display3D() {
 	//Displays status information for the current loop
 	if(count%num_loops == 0) {
@@ -625,7 +674,7 @@ void display3D() {
 		if(save_state) {
 			save_model_state();
 		}
-		display();
+		display_helper();
 	}
 	if(sim_time <= run_time) {
 		//Performs convection updates if the current simulation is using convection
@@ -680,8 +729,9 @@ void display3D() {
 }
 
 
-/**
- * This captures information when the mous buttons are pressed
+/*
+ * This captures information when the mouse buttons are pressed.
+ * Maintained for debugging.
  */
 /*
 void mouse_button(int button, int state, int x, int y) {
@@ -708,8 +758,9 @@ void mouse_button(int button, int state, int x, int y) {
 }
 */
 
-/**
- *  This captures mouse motion information.
+/*
+ * This captures mouse motion information.
+ * Maintained for debugging
  */
 /*
 void mouse_move(int x, int y) {
@@ -739,44 +790,77 @@ void mouse_move(int x, int y) {
 }
 */
 
+/*
+ *Standard keyboard character control
+ */
 void keyboard(unsigned char key, int x, int y) {
 	switch(key) {
-		case 'w':
-			if(current_slice > 0) {
-				current_slice--;
-				//camera_trans[1]-=0.5;
-				//camera_trans[2]+=1.0;
-				glMatrixMode(GL_PROJECTION);
-				glLoadIdentity();
-				gluPerspective(60, 1.77777f, 1.0, 20000.0);
-				gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
-			}
-			break;
-		case 's':
-			if(current_slice < num_slices-1) {
-				current_slice++;
-				//camera_trans[1]+=0.5;
-				//camera_trans[2]-=1.0;
-				glMatrixMode(GL_PROJECTION);
-				glLoadIdentity();
-				gluPerspective(60, 1.77777f, 1.0, 20000.0);
-				gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
-			}
-			break;
-		case 'x':
-			exit(0);
-		default:
-			break;
+	case '-':
+		if(current_slice > 0) {
+			current_slice--;
+			//camera_trans[1]-=0.5;//For camera mouse control, above
+			//camera_trans[2]+=1.0;
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(60, 1.77777f, 1.0, 20000.0);
+			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+		}
+		break;
+	case '+':
+		if(current_slice < num_slices-1) {
+			current_slice++;
+			//camera_trans[1]+=0.5;//For camera mouse control, above
+			//camera_trans[2]-=1.0;
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(60, 1.77777f, 1.0, 20000.0);
+			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+		}
+		break;
+	case 'x':
+		exit(0);
+	default:
+		break;
 	}
-	display();
+	display_helper();
 }
 
-void glutinit() {
+/*
+ * Special keyboard control for arrows
+ */
+void keyboardSpecial(int key, int x, int y) {
+	switch(key) {
+	case GLUT_KEY_UP:
+		if(current_slice > 0) {			
+			current_slice--;
+			//camera_trans[1]-=0.5;
+			//camera_trans[2]+=1.0;
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(60, 1.77777f, 1.0, 20000.0);
+			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+		}
+		break;
 
+	case GLUT_KEY_DOWN:
+		if(current_slice < num_slices-1) {
+			current_slice++;
+			//camera_trans[1]+=0.5;
+			//camera_trans[2]-=1.0;
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(60, 1.77777f, 1.0, 20000.0);
+			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+		}
+		break;
+	default:
+		break;
+	}
+	display_helper();
 }
 #endif
 
-/**
+/*
  * Clears the cin buffer
  */
 void clear_cin() {
@@ -784,7 +868,7 @@ void clear_cin() {
 	cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
 }
 
-/**
+/*
  * This function waits for the user to hit enter before continuing
  */
 void PressEnterToContinue() {
@@ -793,7 +877,7 @@ void PressEnterToContinue() {
 }
 
 
-/**
+/*
  * Swaps the temp arrays
  */
 void swap_temp_array() {
@@ -804,7 +888,7 @@ void swap_temp_array() {
     next_temp = tmp;
 }
 
-/**
+/*
  * Loads the input file into program memory and allocates
  * necessary memory to store the input variables
  */
@@ -1131,7 +1215,7 @@ void load_file() {
     cout << endl << "Done Loading Input File" << endl;
 }
 
-/**
+/*
  * Saves the current state of the simulation, using the same format
  * as the input file
  */
@@ -1258,7 +1342,7 @@ void save_model_state() {
     }
 }
 
-/**
+/*
  * Saves the current temperatures of the simulation to a DSAA surfer grid file
  */
 void save_surfer() {
@@ -1345,7 +1429,7 @@ void save_surfer() {
     }
 }
 
-/**
+/*
  * Calculates and returns the heat flow per year between two cells in the X direction
  * based on the provided indexes
  */
@@ -1359,7 +1443,7 @@ REAL cond_add_x(int row1, int col1, int slice1, int row2, int col2, int slice2) 
     return 2*temp_diff/(ad*dim_x[col1]);
 }
 
-/**
+/*
  * Calculates and returns the heat flow per year between two cells in the Y direction
  * based on the provided indexes
  */
@@ -1373,7 +1457,7 @@ REAL cond_add_y(int row1, int col1, int slice1, int row2, int col2, int slice2) 
     return 2*temp_diff/(ad*dim_y[row1]);
 }
 
-/**
+/*
  * Calculates and returns the heat flow per year between two cells in the Z direction
  * based on the provided indexes
  */
@@ -1388,7 +1472,7 @@ REAL cond_add_z(int row1, int col1, int slice1, int row2, int col2, int slice2) 
     return 2*temp_diff/(ad*dim_z[slice1]);
 }
 
-/**
+/*
  * Calculates the in-plane heat flow due to conduction in a given slice k.
  * If slices == 1
  *   2d simulation, return 0 for 3rd dimension heat transfer
@@ -1448,7 +1532,7 @@ REAL in_plane_cond(int i, int j, int k) {
     return (heat_flow_x + heat_flow_y);
 }
 
-/**
+/*
  * Updates the temperature array using 3D conduction with finite
  * difference heat flow.
  */
@@ -1482,7 +1566,7 @@ void conduction(){
     swap_temp_array();    //Swaps the current and next temperature arrays
 }
 
-/**
+/*
  * Performs convection between two specified cells
  */
 void perform_convection(int row1, int col1, int slice1, int row2, int col2, int slice2) {
@@ -1513,7 +1597,7 @@ void perform_convection(int row1, int col1, int slice1, int row2, int col2, int 
     }
 }
 
-/**
+/*
  * Updates the temperature array using convection
  */
 void convection() {
@@ -1634,7 +1718,7 @@ void convection() {
     }
 }
 
-/**
+/*
  * Finds and returns the maximum temperature difference between
  * the current and next temperature arrays.
  */
@@ -1654,7 +1738,7 @@ REAL find_max_temp_diff() {
     return max_diff;
 }
 
-/**
+/*
  * Finds the index of a given x, y, and z value in meters and
  * stores them in the index array
  */
@@ -1704,7 +1788,7 @@ void find_loc_index(REAL x_loc, REAL y_loc, REAL z_loc, int *index){
 }
 
 
-/**
+/*
  * Finds the indexes of two corners of the moving source
  * if either falls within the model. The valid parts of the
  * moving source are updated with the moving sources temperature
@@ -1732,7 +1816,7 @@ void update_mvsrc(int index) {
     }
 }
 
-/**
+/*
  * Updates the moving sources velocity and position vectors
  * then updates the temperatures in the current temp array
  */
@@ -1750,7 +1834,7 @@ void update_moving_sources() {
     }
 }
 
-/**
+/*
  * Performs a finite heat flow simulation using
  * conduction and convection.
  */
@@ -1786,7 +1870,7 @@ int main(int argc, char **argv) {
     //Loads the input file for the simulation
     load_file();
 
-    /**
+    /*
      * Allows the user to change multiple rectangular blocks of temperatures
      * within the model
      */
@@ -1838,7 +1922,7 @@ int main(int argc, char **argv) {
         }
     }
     
-    /**
+    /*
      * Allows the user to start one or more moving sources.
      */
     cout << endl << endl << "To Start One or More Moving Sources Enter 1, Else Enter 0: ";
@@ -1988,7 +2072,7 @@ int main(int argc, char **argv) {
     cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
     PressEnterToContinue();
     
-    /**
+    /*
      * The main loop of the simulation
      */
     count = 0;    //Number of loops performed
@@ -2002,7 +2086,7 @@ int main(int argc, char **argv) {
 
 #ifdef DISPLAY
 	array_minmax();
-	array_size = num_cols * num_rows * num_slices;
+	array_size = num_cols * num_rows;
 	color_field = new float[array_size * 3];
 	for (int i=0; i<array_size *3; i++) {
 		color_field[i] = 0.0;
@@ -2026,9 +2110,11 @@ int main(int argc, char **argv) {
 
 	glutDisplayFunc(display3D);
 	
-	//glutMouseFunc(mouse_button);
-   // glutMotionFunc(mouse_move);
+	//glutMouseFunc(mouse_button);//Mouse motion and camera trans settings maintained for debugging
+    //glutMotionFunc(mouse_move);
 	glutKeyboardFunc(keyboard);
+	glutSpecialFunc(keyboardSpecial);
+
 	/*camera_trans[0] = -num_cols/2.0;
 	camera_trans[1] = num_rows/3.0;
 	camera_trans[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
@@ -2038,6 +2124,7 @@ int main(int argc, char **argv) {
 	camera_trans_lag[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
 	camera_rot_lag[0] = 28.0;
 	*/
+
 	gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
 	glutMainLoop();
 #else
