@@ -15,10 +15,11 @@
 
 #define OUT_PRECISION 2         //Number of digits to print after the decimal place for floating point values
 #define INDEX_WIDTH 2           //The number of characters to print and read for each conduction and convection code
-#define REAL float              //The precision of the model.
+#define REAL double             //The precision of the model.
 
 using std::cerr;
 using std::cout;
+using std::cin;
 using std::endl;
 using std::string;
 using std::ofstream;
@@ -39,13 +40,8 @@ using std::ios;
  * output filename
  */
 int main(int argc, char **argv) {
-    if(argc != 3) {
-        cerr << "Incorrect Command Line Arguments" << endl;
-        cerr << "Usage: convert <input filename> <output filename>" << endl;
-        cerr << "\t<input filename>  - The input(old) filename with extension" << endl;
-        cerr << "\t<output filename> - The out(new) filename with extension" << endl << endl;
-        exit(1);
-    }
+    string in_filename;     //The input filename
+    string out_filename;    //The output filename
     ifstream in_file;       //Input file stream
     ofstream out_file;      //Output file stream
     int temp_int;           //Temporary int
@@ -59,19 +55,25 @@ int main(int argc, char **argv) {
     
     //Opens the input file for reading
     //Exits the program if it fails to open
-    in_file.open(argv[1],ios::in);
-    if(!in_file.is_open()) {
-        cerr << "Unable to open input file" << endl;
-        exit(1);
-    }
+    do {
+        cout << "Input File Name: ";
+        cin >> in_filename;
+        in_file.open(in_filename.c_str(),ios::in);
+        if(!in_file.is_open()) {
+            cout << "File Not found!" << endl;
+        }
+    } while(!in_file.is_open());
     
     //Opens the output file for reading
     //Exits the program if it fails to open
-    out_file.open(argv[2],ios::out);
-    if(!out_file.is_open()) {
-        cerr << "Unable to open output file" << endl;
-        exit(1);
-    }
+    do {
+        cout << "Output File Name: ";
+        cin >> out_filename;
+        out_file.open(out_filename.c_str(),ios::out);
+        if(!out_file.is_open()) {
+            cout << "Unable to create output file" << endl;
+        }
+    } while(!out_file.is_open());
     
     //num_rows num_cols num_slices using_convection
     in_file >> num_rows >> num_cols >> using_convection;
@@ -106,7 +108,14 @@ int main(int argc, char **argv) {
     for(int i = 0; i < num_rows; i++) {
         for(int j = 0; j < num_cols; j++) {
             in_file >> temp_str;
+            temp_int = atoi(temp_str.substr(2,2).c_str());
             out_file << " " << setw(INDEX_WIDTH) << atoi(temp_str.substr(0,1).c_str()) << setw(INDEX_WIDTH) << atoi(temp_str.substr(1,1).c_str());
+            if(temp_int == 2) {
+                out_file << setw(1) << 0;
+            }
+            else {
+                out_file << setw(1) << 1;
+            }
         }
         out_file << endl;
     }

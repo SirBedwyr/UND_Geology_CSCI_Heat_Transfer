@@ -3,14 +3,10 @@
  * Reports any differences above a user specified tolerance and displays
  * a summary of the results of the comparision. All cli output is also
  * written to a log file.
- * The program takes in three command line arguments:
- * <filename 1> <filename 2> <tolerance>
- *         filename 1 - The name of the first surfer file
- *         filename 2 - The name of the second surfer file
- *        tolerance  - The minimum temperature difference to be considered different
  */
  
 #ifdef _WIN32
+#define NOMINMAX //FYI need to disable min/max macro in windows.h
 #include <windows.h>
 #endif
 
@@ -21,7 +17,7 @@
 #include <limits>
 #include <math.h>
 
-#define REAL float
+#define REAL double
 
 using std::cerr;
 using std::cin;
@@ -35,9 +31,23 @@ using std::fixed;
 using std::scientific;
 using std::setprecision;
 using std::ios;
+using std::numeric_limits;
+using std::streamsize;
+using std::max;
+using std::flush;
+
+/*
+ * Clears the cin buffer
+ */
+void clear_cin() {
+	cin.clear();
+	cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
+}
 
 int main(int argc, char **argv) {
     string input;                                     //Input buffer
+    string in1_filename;                              //The first surfer filename
+    string in2_filename;                              //The second surfer filename
     ifstream in1, in2;                                //Input file streams
     ofstream out;                                     //Output file stream
     int dim_x[2], dim_y[2];                           //X and Y dimensions of the two files
@@ -51,30 +61,40 @@ int main(int argc, char **argv) {
     //Opens the log file for writting
     out.open("log.txt",ios::out);
     
-    //Checks if the correct number of command line arguments was provided
-    if(argc != 4) {
-        cout << "Incorrect command line arguments" << endl;
-        cout << "compare <filename 1> <filename 2> <tolerance>" << endl;
-        out << "Incorrect command line arguments" << endl;
-        out << "compare <filename 1> <filename 2> <tolerance>" << endl;
-        exit(1);
+    //Asks the user for the first surfer filename
+    do {
+        cout << "First Surfer File Name: ";
+        cin >> in1_filename;
+        in1.open(in1_filename.c_str(),ios::in);
+        if(!in1.is_open()) {
+            cout << "File Not found!" << endl;
+        }
+    } while(!in1.is_open());
+    
+    //Asks the user for the second surfer filename
+    do {
+        cout << "Second Surfer File Name: ";
+        cin >> in2_filename;
+        in2.open(in2_filename.c_str(),ios::in);
+        if(!in2.is_open()) {
+            cout << "File Not found!" << endl;
+        }
+    } while(!in2.is_open());
+    
+    //Asks the user for teh tolerance
+    cout << "Enter the minimum value to be considered different: ";
+    while(!(cin >> tolerance)) {
+		clear_cin();
+        cout << "Incorrect input, enter a number greater than 0: ";
     }
     
-    tolerance = atof(argv[3]);    //Retrieves the user specified tolerance
     
-    cout << "Opening \"" << argv[1] << "\" and \"" << argv[2] << "\" for comparision" << endl;
+    cout << "Opening \"" << in1_filename << "\" and \"" << in2_filename << "\" for comparision" << endl;
     cout << "Tolerance = " << tolerance << endl;
-    out << "Opening \"" << argv[1] << "\" and \"" << argv[2] << "\" for comparision" << endl;
+    out << "Opening \"" << in1_filename << "\" and \"" << in2_filename << "\" for comparision" << endl;
     out << "Tolerance = " << tolerance << endl;
     
-    //Checks if file 1 exists and is a DSAA surfer grid file
-    in1.open(argv[1],ios::in);
-    if(!in1.is_open()) {
-        cout << "Unable to open surfer file 1" << endl;
-        out << "Unable to open surfer file 1" << endl;
-        out.close();
-        exit(1);
-    }
+    //Checks if file 1 is a DSAA surfer grid file
     in1 >> input;
     if(input.compare("DSAA") != 0) {
         cout << "File 1 is not a DSAA surfer grid file" << endl;
@@ -84,15 +104,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
     
-    //Checks if file 1 exists and is a DSAA surfer grid file
-    in2.open(argv[2],ios::in);
-    if(!in2.is_open()) {
-        cout << "Unable to open surfer file 2" << endl;
-        out << "Unable to open surfer file 2" << endl;
-        in1.close();
-        out.close();
-        exit(1);
-    }
+    //Checks if file 2 is a DSAA surfer grid file
     in2 >> input;
     if(input.compare("DSAA") != 0) {
         cout << "File 2 is not a DSAA surfer grid file" << endl;
