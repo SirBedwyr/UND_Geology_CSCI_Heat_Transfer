@@ -1,0 +1,8 @@
+Implement the change temperature block using CUDA
+
+Implement the moving source using CUDA
+
+Implement the tolerance option
+    Could use the same method as the CUDA reduction example
+    
+Implement the CUDA functions in the display portion of the program
