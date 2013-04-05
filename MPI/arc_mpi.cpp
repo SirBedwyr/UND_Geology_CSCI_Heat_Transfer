@@ -22,6 +22,7 @@
 #	include "GL/freeglut.h"
 #endif
 
+#include <stdlib.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -29,16 +30,30 @@
 #include <iomanip>
 #include <limits>
 #include <cmath>
+#include <string.h>
+#include <mpi.h>
+
+#ifdef TIME
+#ifdef _WIN32
+#include <time.h>
+SYSTEMTIME start, end;
+#else
+#include<time.h>		//Time library
+#include<sys/time.h>	//Used for the gettimeofday function and timeval struct
+struct timeval start, end;
+#endif
+#endif
 
 /**
  * Time_step (seconds/yr) divided by the product of density and heat capacity.
  * The value for the density is 2200 kg/m^3 and heat capacity is 1000 kJ/kg K.
  */
-#define QFAC 14.33              //Description is defined in the previous comment
-#define DTC 0.25                //
-#define OUT_PRECISION 10        //Number of digits to print after the decimal place for floating point values
-#define INDEX_WIDTH 2           //The number of characters to print and read for each conduction and convection code
-#define REAL double             //The precision of the model.
+#define QFAC 14.33                 //Description is defined in the previous comment
+#define DTC 0.25                   //
+#define OUT_PRECISION 10           //Number of digits to print after the decimal place for floating point values
+#define INDEX_WIDTH 2              //The number of characters to print and read for each conduction and convection code
+#define REAL double                //The precision of the model.
+#define MPI_REAL_VALUE MPI_DOUBLE  //The data type of the MPI messages
 
 using std::cerr;
 using std::cin;
@@ -61,6 +76,7 @@ using std::streamsize;
 using std::max;
 using std::flush;
 
+//Function prototypes
 void save_surfer();
 void save_model_state();
 void conduction();
@@ -69,6 +85,13 @@ void PressEnterToContinue();
 REAL find_max_temp_diff();
 void update_moving_sources();
 void find_loc_index(REAL x_loc, REAL y_loc, REAL z_loc, int *index);
+
+
+//MPI Requests for asynchronous sends and receives
+MPI_Request *request1;
+MPI_Request *request2;
+MPI_Request *request3;
+MPI_Request *request4;
 
 //Conduction code specific variables
 int ***cond_codes;              //The unmodified conduction codes as read from the input file
@@ -154,9 +177,9 @@ REAL time_step = -1;            //The amount of time that passes between each up
 REAL run_time = -1;             //The run time of the simulation
 
 //Global variables
-int save_state = -1;            //Indicates if the model should save the current state at each screen update
-int save_result = -1;           //Indicates if the model should save the final result of the simulaiton
-int use_tolerance = -1;         //Indicates if the model should stop once a user specified tolerance is met for temperature change
+int save_state = 0;            //Indicates if the model should save the current state at each screen update
+int save_result = 0;           //Indicates if the model should save the final result of the simulaiton
+int use_tolerance = 0;         //Indicates if the model should stop once a user specified tolerance is met for temperature change
 REAL max_vel;                   //The maximum convection velocity of the velocity array
 REAL min_row_dim;               //The minimum y dimension of each cell of the simulation
 REAL min_col_dim;               //The minimum x dimension of each cell of the simulation
@@ -170,13 +193,19 @@ int su_num_width;               //The number of characters for the slice number 
 unsigned long long count = 0;	//The current loop
 REAL tolerance = -1;            //The maximum difference required for the model to stop
 REAL max_temp_diff;             //The maximum temperature difference between the current and next temperature arrays
+int my_rank;                    //The rank of the current process
+int comm_sz;                    //The total number of processes in the simulation
+int *chunk_size;                //The number of rows per MPI process
+int *displacements;             //The row displacements for each process
+int st_index = 0;               //Starting row index for a each mpi process
+int en_index = 0;               //Ending row index for each mpi process
 
 /**
  * Deallocates all allocated memory used by the program
  */
 void deallocate_memory() {
      //Deletes allocated memory
-    for(int i = 0; i < num_rows; i++) {
+    for(int i = 0; i < chunk_size[my_rank]+2; i++) {
         for(int j = 0; j < num_cols; j++) {
             delete[] temp[i][j];
             delete[] next_temp[i][j];
@@ -297,6 +326,10 @@ void array_minmax() {
 	}
 }
 
+/**
+ * Updates max_temp with the maximum temp of
+ * the current slice.
+ */
 void array_max() {
     max_temp=temp[0][0][0];
     for(int i = 0; i < num_rows; i++) {
@@ -307,7 +340,6 @@ void array_max() {
         }
     }
 }
-
 
 /* 
  * 3D to 1D indexing
@@ -547,6 +579,7 @@ void displayOverlay(){
 			str1.str("");
 			str1.clear();
 
+
 		glPopMatrix();
         glPushMatrix();
             glLoadIdentity();
@@ -554,6 +587,7 @@ void displayOverlay(){
 
 			str << "Time Interval:" << endl;
 			if(using_convection) {
+
 				str << "Conv. Time Interval:" << endl;
 				str << "Num Conv. Loops:" << endl;
 			}
@@ -735,7 +769,7 @@ void display3D() {
 
 		delete[] color_field;
         deallocate_memory();
-        glutLeaveMainLoop();
+		glutLeaveMainLoop();
 	}
 	glutPostRedisplay();
 }
@@ -896,6 +930,32 @@ void keyboardSpecial(int key, int x, int y) {
 }
 #endif
 
+
+/**
+ * Asynchronously Sends and receives edge data based on the processes rank
+ */
+void update_cells_mpi() {
+	if(comm_sz > 1) {
+		for(int j = 0; j < num_cols; j++) {
+			if(my_rank == 0) {
+				MPI_Isend(next_temp[chunk_size[my_rank]-1][j],num_slices,MPI_REAL_VALUE,my_rank+1,0,MPI_COMM_WORLD,&request1[j]);
+				MPI_Irecv(next_temp[chunk_size[my_rank]][j],num_slices,MPI_REAL_VALUE,my_rank+1,0,MPI_COMM_WORLD,&request2[j]);
+			}
+			else if(my_rank == comm_sz-1) {
+                MPI_Isend(next_temp[1][j],num_slices,MPI_REAL_VALUE,my_rank-1,0,MPI_COMM_WORLD,&request1[j]);
+				MPI_Irecv(next_temp[0][j],num_slices,MPI_REAL_VALUE,my_rank-1,0,MPI_COMM_WORLD,&request2[j]);
+			}
+			else {
+				MPI_Isend(next_temp[chunk_size[my_rank]][j],num_slices,MPI_REAL_VALUE,my_rank+1,0,MPI_COMM_WORLD,&request1[j]);
+                MPI_Isend(next_temp[1][j],num_slices,MPI_REAL_VALUE,my_rank-1,0,MPI_COMM_WORLD,&request2[j]);
+				MPI_Irecv(next_temp[0][j],num_slices,MPI_REAL_VALUE,my_rank-1,0,MPI_COMM_WORLD,&request3[j]);
+				MPI_Irecv(next_temp[chunk_size[my_rank]+1][j],num_slices,MPI_REAL_VALUE,my_rank+1,0,MPI_COMM_WORLD,&request4[j]);
+			}
+		}
+	}
+}
+
+
 /*
  * Clears the cin buffer
  */
@@ -932,75 +992,149 @@ void load_file() {
     ifstream source_file;       //Input file stream
     string temp_str;
     ostringstream str_conv;
+	char tmp[500];
     
     //Ask for the input file names and displays an error message
     //if the file does not exist
-    do {
-        cout << "Input File Name: ";
-        cin >> source_filename;
+	if(my_rank == 0) {
+        cout << "Input File Name: " << source_filename << endl;
         source_file.open(source_filename.c_str(),ios::in);
         if(!source_file.is_open()) {
             cout << "File Not found!" << endl;
+            MPI_Finalize();
+            exit(1);
         }
-    } while(!source_file.is_open());
-    
-    //Asks the user if the state of the model should be saved every screen update
-    cout << endl << "To save the state of the model every screen update enter 1, otherwise 0: ";
-    while(!(cin >> save_state) || save_state < 0 || save_state > 1) {
-		clear_cin();
-        cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
-    }
+		strcpy(tmp,source_filename.c_str());
+		MPI_Bcast(tmp,500,MPI_CHAR,0,MPI_COMM_WORLD);
+        MPI_Bcast(&save_result,1,MPI_INT,0,MPI_COMM_WORLD);
 
-    if(save_state == 0) {
-        //Asks the user if the final result of the model should be saved
-        cout << endl << "To save the final result of the model enter 1, otherwise 0: ";
-        while(!(cin >> save_result) || save_result < 0 || save_result > 1) {
+#ifdef TIME
+#ifdef _WIN32
+        GetSystemTime(&start);
+#else
+        gettimeofday(&start, NULL);
+#endif
+#endif
+        /*
+		do {
+			cout << "Input File Name: ";
+			//cin >> source_filename;
+			source_file.open(source_filename.c_str(),ios::in);
+			if(!source_file.is_open()) {
+				cout << "File Not found!" << endl;
+			}
+		} while(!source_file.is_open());
+		strcpy(tmp,source_filename.c_str());
+		MPI_Bcast(tmp,500,MPI_CHAR,0,MPI_COMM_WORLD);
+		
+		//Asks the user if the state of the model should be saved every screen update
+		/*cout << endl << "To save the state of the model every screen update enter 1, otherwise 0: ";
+		while(!(cin >> save_state) || save_state < 0 || save_state > 1) {
 			clear_cin();
-            cout << "Incorrect input, to save the final result of the model enter 1, else 0: ";
-        }
-    }
-    
-    //Ask for the state filename if the user specified that the file should be saved
-    if(save_state == 1 || save_result == 1) {
-        cout << "Output filename: ";
-        cin >> output_filename;
-    }
-    
-    //Asks for the DSAA surfer grid filenmae
-    cout << "Surfer filename: ";
-    while(!(cin >> output_su_filename) || output_su_filename.length() < 5) {
-		clear_cin();
-		cout << "Please enter a filename at least 5 characters in length: ";
-	}
+			cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
+		}
 
-    
-    //Loads the input file
-    cout << endl << endl << "Loading Input File";
-    
+		if(save_state == 0) {
+			//Asks the user if the final result of the model should be saved
+			cout << endl << "To save the final result of the model enter 1, otherwise 0: ";
+			while(!(cin >> save_result) || save_result < 0 || save_result > 1) {
+				clear_cin();
+				cout << "Incorrect input, to save the final result of the model enter 1, else 0: ";
+			}
+		}
+		
+		//Ask for the state filename if the user specified that the file should be saved
+		if(save_state == 1 || save_result == 1) {
+			cout << "Output filename: ";
+			cin >> output_filename;
+		}
+		*/
+        if(save_result == 1) {
+            cout << "Output filename: " << output_filename << endl;
+        }
+		//Asks for the DSAA surfer grid filenmae
+		cout << "Surfer filename: " << output_su_filename << endl;;
+		/*while(!(cin >> output_su_filename) || output_su_filename.length() < 5) {
+			clear_cin();
+			cout << "Please enter a filename at least 5 characters in length: ";
+		}*/
+
+		//Loads the input file
+		cout << endl << endl << "Loading Input File";
+	}
+	else {
+		MPI_Bcast(tmp,500,MPI_CHAR,0,MPI_COMM_WORLD);
+        MPI_Bcast(&save_result,1,MPI_INT,0,MPI_COMM_WORLD);
+		source_filename.assign(tmp);
+		source_file.open(source_filename.c_str(),ios::in);
+		if(!source_file.is_open()) {
+			cout << "Process : " << my_rank << " File Not found!" << endl;
+            exit(1);
+		}
+	}
     //Retrieves the simulation parameters from the input file
     source_file >> num_rows >> num_cols >> num_slices >> using_convection;
     source_file >> chf >> initial_time;
     getline(source_file,title);
     getline(source_file,title);
     
-    //displays parameters of the input file
-    cout << endl << endl << "Number of rows   = " << num_rows << endl;
-    cout << "Number of cols   = " << num_cols << endl;
-    cout << "Number of slices = " << num_slices << endl;
-    if(using_convection == 1) {
-        cout << "Using convection" << endl;
+    //Allocates memory for MPI requests
+    if(my_rank == 0 || my_rank == comm_sz -1) {
+        request1 = new MPI_Request[num_cols];
+        request2 = new MPI_Request[num_cols];
     }
     else {
-        cout << "No Convection" << endl;
+        request1 = new MPI_Request[num_cols];
+        request2 = new MPI_Request[num_cols];
+        request3 = new MPI_Request[num_cols];
+        request4 = new MPI_Request[num_cols];
     }
-    cout << endl << "Constant Heat Flow at Base of Model = " << chf << "mW M^2" << endl;
+    
+    
+	if(my_rank == 0) {
+		//displays parameters of the input file
+		cout << endl << endl << "Number of rows   = " << num_rows << endl;
+		cout << "Number of cols   = " << num_cols << endl;
+		cout << "Number of slices = " << num_slices << endl;
+		if(using_convection == 1) {
+			cout << "Using convection" << endl;
+		}
+		else {
+			cout << "No Convection" << endl;
+		}
+		cout << endl << "Constant Heat Flow at Base of Model = " << chf << "mW M^2" << endl;
+		cout << "Model time elapsed = " << initial_time << " Years" << endl << endl;
+	}
     chf *= 0.001;
-    cout << "Model time elapsed = " << initial_time << " Years" << endl << endl;
     
-    //Calculates the number of characters for the surfer file index
-    str_conv << num_slices;
-    su_num_width = str_conv.str().length();
-    
+    if(my_rank == 0) {
+		//Calculates the number of characters for the surfer file index
+		str_conv << num_slices;
+		su_num_width = str_conv.str().length();
+    }
+	
+    //Calculates the chunk size and row displacements
+	double count = 0.0; 
+    double prev_count;
+    chunk_size = new int[comm_sz];
+	displacements = new int[comm_sz];
+	int sum = 0;
+    for(int i = 0; i < comm_sz; i++) {
+		displacements[i] = (int)count;
+        prev_count = count;
+        count += (double)num_rows / (double)comm_sz;
+        chunk_size[i] = (int)count - (int)prev_count;
+		sum += chunk_size[i];
+    }
+	if(sum != num_rows) {
+		chunk_size[comm_sz-1] += num_rows-sum;
+		sum += num_rows-sum;
+	}
+    if(sum != num_rows) {
+        cout << "Size mismatch" << endl;
+        exit(1);
+    }
+	
     //Allocates memory for the conduction variables based on the previously read in simulation
     //parameters
     dim_x = new REAL[num_cols];
@@ -1009,13 +1143,13 @@ void load_file() {
     dist_x = new REAL[num_cols];
     dist_y = new REAL[num_rows];
     dist_z = new REAL[num_slices];
-    temp = new REAL**[num_rows];
-    next_temp = new REAL**[num_rows];
-    cond_codes = new int**[num_rows];
-    cond_hp_index = new int**[num_rows];
-    cond_tc_index = new int**[num_rows];
-    use_cond = new int**[num_rows];
-    for(int i = 0; i < num_rows; i++) {
+    temp = new REAL**[chunk_size[my_rank]+2];
+    next_temp = new REAL**[chunk_size[my_rank]+2];
+    cond_codes = new int**[chunk_size[my_rank]+2];
+    cond_hp_index = new int**[chunk_size[my_rank]+2];
+    cond_tc_index = new int**[chunk_size[my_rank]+2];
+    use_cond = new int**[chunk_size[my_rank]+2];
+    for(int i = 0; i < chunk_size[my_rank]+2; i++) {
         temp[i] = new REAL*[num_cols];
         next_temp[i] = new REAL*[num_cols];
         cond_codes[i] = new int*[num_cols];
@@ -1031,16 +1165,36 @@ void load_file() {
             use_cond[i][j] = new int[num_slices];
         }
     }
+    
+	REAL tmp_real;
     //Reads in the starting temperatures of the simulation from the input file
     for (int k = 0; k < num_slices; k++) {
         for(int i = 0; i < num_rows; i++) {
             for(int j = 0; j < num_cols; j++) {
-                source_file >> temp[i][j][k];
+				source_file >> tmp_real;
+				if(my_rank == 0) {
+					if(i >= 0 && i <= chunk_size[my_rank]) {
+						temp[i][j][k] = tmp_real;
+					}
+				}
+				else if(my_rank == comm_sz-1) {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
+					}
+				}
+				else {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
+					}
+				}
             }
         }
     }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
-
+	if(my_rank == 0) {
+		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
+	}
+	
+	
     //Reads in the conduction codes for each cell of the simulation and parses
     //the array indexs from the codes
     //Unlike, the Fortran version of the program, the conduction direction codes
@@ -1049,27 +1203,49 @@ void load_file() {
         for(int i = 0; i < num_rows; i++) {
             for(int j = 0; j < num_cols; j++) {
                 source_file >> temp_str;
-                cond_codes[i][j][k] = atoi(temp_str.c_str());
-                cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+				if(my_rank == 0) {
+					if(i >= 0 && i <= chunk_size[my_rank]) {
+						cond_codes[i][j][k] = atoi(temp_str.c_str());
+						cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                        use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+					}
+				}
+				else if(my_rank == comm_sz-1) {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						cond_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+						cond_tc_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						cond_hp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                        use_cond[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+					}
+				}
+				else {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						cond_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+						cond_tc_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						cond_hp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						use_cond[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+					}
+				}
             }
         }
     }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
-
+	if(my_rank == 0) {
+		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
+	}
+    
     //If convection is used for the user specified input file, memory is allocated for its
     //variables and they are read in from the input file
     if(using_convection) {     
         //Allocates memory for the convection variables based on the previously read in simulation
         //parameters
-        conv_codes = new int**[num_rows];
-        conv_min_temp_index = new int**[num_rows];
-        conv_direction = new int**[num_rows];
-        conv_vel_index = new int**[num_rows];
-        conv_fluid_index = new int**[num_rows];
-        conv_rock_index = new int**[num_rows];
-        for(int i = 0; i < num_rows; i++) {
+        conv_codes = new int**[chunk_size[my_rank]+2];
+        conv_min_temp_index = new int**[chunk_size[my_rank]+2];
+        conv_direction = new int**[chunk_size[my_rank]+2];
+        conv_vel_index = new int**[chunk_size[my_rank]+2];
+        conv_fluid_index = new int**[chunk_size[my_rank]+2];
+        conv_rock_index = new int**[chunk_size[my_rank]+2];
+        for(int i = 0; i < chunk_size[my_rank]+2; i++) {
             conv_codes[i] = new int*[num_cols];
             conv_min_temp_index[i] = new int*[num_cols];
             conv_direction[i] = new int*[num_cols];
@@ -1092,16 +1268,42 @@ void load_file() {
             for(int i = 0; i < num_rows; i++) {
                 for(int j = 0; j < num_cols; j++) {
                     source_file >> temp_str;
-                    conv_codes[i][j][k] = atoi(temp_str.c_str());
-                    conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+					if(my_rank == 0) {
+						if(i >= 0 && i <= chunk_size[my_rank]) {
+							conv_codes[i][j][k] = atoi(temp_str.c_str());
+							conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+						}
+					}
+					else if(my_rank == comm_sz-1) {
+						if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+							conv_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+							conv_min_temp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_vel_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_fluid_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_rock_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_direction[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+						}
+					}
+					else {
+						if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+							conv_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+							conv_min_temp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_vel_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_fluid_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_rock_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							conv_direction[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+						}
+					}
                 }
             }
         }
-        cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
+		if(my_rank == 0) {
+			cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
+		}
     }
     //Reads in the Y (column) dimensions and finds the minimum column distance
     for(int i = 0; i < num_cols; i++) {
@@ -1158,14 +1360,17 @@ void load_file() {
         source_file >> heat_production_values[i];
         heat_production_values[i] /= 1E6;
     }
-    cout << "Read "<< num_hp << " heat production values" << endl;
-    
+	if(my_rank == 0) {
+		cout << "Read "<< num_hp << " heat production values" << endl;
+    }
     //Reads in the thermal conduction difference values
     //Finds the minimum and maximum thermal conductivity differences and
     //performs some scaling of the conduction associated variables
     source_file >> num_tcd;
     thermal_conduct_diff = new REAL[num_tcd];
-    cout << "Converted " << num_tcd << " Thermal Conductivities to Diff. in m^2/y" << endl;
+	if(my_rank == 0) {
+		cout << "Converted " << num_tcd << " Thermal Conductivities to Diff. in m^2/y" << endl;
+	}
     for(int i = 0; i < num_tcd; i++) {
         source_file >> thermal_conduct_diff[i];
         thermal_conduct_diff[i] *= 14.33;
@@ -1181,7 +1386,9 @@ void load_file() {
                 min_thermal_conduct_diff = thermal_conduct_diff[i];
             }
         }
-        cout << "  " << thermal_conduct_diff[i];
+		if(my_rank == 0) {
+			cout << "  " << thermal_conduct_diff[i];
+		}
     }
 
     //Reads in the convection specific variables if convection
@@ -1214,23 +1421,31 @@ void load_file() {
         for(int i = 0; i < num_vel; i++) {
             source_file >> vel[i];
         }
-        cout << endl << "Read " << num_vel << " Velocities in m/yr" << endl;
-        
+		if(my_rank == 0) {
+			cout << endl << "Read " << num_vel << " Velocities in m/yr" << endl;
+        }
+		
         //Finds the maximum convection velocity
         max_vel = vel[0];
-        cout << " " << vel[0];
+		if(my_rank == 0) {
+			cout << " " << vel[0];
+		}
         for(int i = 1 ; i < num_vel; i++) {
             if(vel[i] > max_vel) {
                 max_vel = vel[i];
             }
-            cout << " " << vel[i];
+			if(my_rank == 0) {
+				cout << " " << vel[i];
+			}
         }
-        cout << endl;
+		if(my_rank == 0) {
+			cout << endl;
+		}
     }
     
     //Closes the input file
     source_file.close();
-    
+	
     /*
     T1 = max_thermal_conduct_diff;
     T2 = min_col_dim;
@@ -1252,7 +1467,9 @@ void load_file() {
     else {
         time_step = min_row_dim*min_row_dim/(5*max_thermal_conduct_diff);
     }
-    cout << endl << "Done Loading Input File" << endl;
+	if(my_rank == 0) {
+		cout << endl << "Done Loading Input File" << endl;
+	}
 }
 
 /*
@@ -1261,124 +1478,181 @@ void load_file() {
  */
 void save_model_state() {
     ofstream output_file;    //Output file stream
-    
+    REAL tmp_array[chunk_size[my_rank]*num_cols];
+	REAL tmp_array1[num_rows*num_cols];
+    int code_array[chunk_size[my_rank]*num_cols];
+	int code_array1[num_rows*num_cols];
     //Opens the output file for writing
-    output_file.open(output_filename.c_str(),ios::out);
-    if(!output_file.is_open()) {
-        cerr << "Failed to write state to file" << endl;
-        exit(1);
-    }
-    else {
-        //Prints the simulation parameters to the output file
-        output_file << setw(20) << num_rows << " " << setw(20) << num_cols << " " << setw(20) << num_slices << setw(20) << using_convection << endl;
-        output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
-        output_file << title << endl;
-        
-        output_file << setprecision(OUT_PRECISION);
-        //Prints the current temperature array of the simulation
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << setw(OUT_PRECISION+5) << temp[i][j][k];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
+    if(my_rank == 0) {
+        output_file.open(output_filename.c_str(),ios::out);
+        if(!output_file.is_open()) {
+            cerr << "Failed to write state to file" << endl;
+            exit(1);
         }
-        
-        //Prints the conduction codes of the simulation to the output file
-        output_file << setfill('0');
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << setw(2*INDEX_WIDTH+1) << cond_codes[i][j][k];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
-        }
-        
-        //Prints the convection codes to the output file if convection is being used
-        if(using_convection) {
+        else {
+            //Prints the simulation parameters to the output file
+            output_file << setw(20) << num_rows << " " << setw(20) << num_cols << " " << setw(20) << num_slices << setw(20) << using_convection << endl;
+            output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
+            output_file << title << endl;
+            
+            output_file << setprecision(OUT_PRECISION);
+            //Prints the current temperature array of the simulation
             for (int k = 0; k < num_slices; k++) {
+                for(int i = 0; i < chunk_size[my_rank]; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        tmp_array1[i*num_cols + j] = temp[i][j][k];
+                    }
+                }
+                for(int i = 1; i < comm_sz; i++) {
+                    MPI_Recv(&tmp_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_REAL_VALUE,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                }
+                
                 for(int i = 0; i < num_rows; i++) {
                     for(int j = 0; j < num_cols; j++) {
-                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i][j][k];
+                        output_file << " " << setw(OUT_PRECISION+5) << tmp_array1[i*num_cols + j];
                     }
                     output_file << endl;
                 }
                 output_file << endl;
             }
-        }
-        
-        output_file << setfill(' ');
-        output_file << setprecision(3);
-        //Prints the column (X) dimensions of the simulation to the output file
-        for(int i = 0; i < num_cols; i++) {
-            output_file << " " << dim_x[i];
-        }
-        output_file << endl;
-        
-        //Prints the row (Y) dimensions of the simulation to the output file
-        for(int i = 0; i < num_rows; i++) {
-            output_file << " " << dim_y[i];
-        }
-        output_file << endl;
-        
-        // Prints the slice (Z) dimensions of the simulation to the oputput file
+            
+            //Prints the conduction codes of the simulation to the output file
+            output_file << setfill('0');
+            for (int k = 0; k < num_slices; k++) {
+                for(int i = 0; i < chunk_size[my_rank]; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        code_array1[i*num_cols + j] = cond_codes[i][j][k];
+                    }
+                }
+                for(int i = 1; i < comm_sz; i++) {
+                    MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                }
+                
+                for(int i = 0; i < num_rows; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        output_file << " " << setw(2*INDEX_WIDTH+1) << code_array1[i*num_cols + j];
+                    }
+                    output_file << endl;
+                }
+                output_file << endl;
+            }
+            
+            //Prints the convection codes to the output file if convection is being used
+            if(using_convection) {
+                for (int k = 0; k < num_slices; k++) {
+                    for(int i = 0; i < chunk_size[my_rank]; i++) {
+                        for(int j = 0; j < num_cols; j++) {
+                            code_array1[i*num_cols + j] = conv_codes[i][j][k];
+                        }
+                    }
+                    for(int i = 1; i < comm_sz; i++) {
+                        MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                    }
+                    for(int i = 0; i < num_rows; i++) {
+                        for(int j = 0; j < num_cols; j++) {
+                            output_file << " " << setw(4*INDEX_WIDTH+2) << code_array1[i*num_cols + j];
+                        }
+                        output_file << endl;
+                    }
+                    output_file << endl;
+                }
+            }
+            
+            output_file << setfill(' ');
+            output_file << setprecision(3);
+            //Prints the column (X) dimensions of the simulation to the output file
+            for(int i = 0; i < num_cols; i++) {
+                output_file << " " << dim_x[i];
+            }
+            output_file << endl;
+            
+            //Prints the row (Y) dimensions of the simulation to the output file
+            for(int i = 0; i < num_rows; i++) {
+                output_file << " " << dim_y[i];
+            }
+            output_file << endl;
+            
+            // Prints the slice (Z) dimensions of the simulation to the oputput file
 
-        for (int i = 0; i < num_slices; i++) {
-            output_file << " " << dim_z[i];
-        }
-        output_file << endl;
+            for (int i = 0; i < num_slices; i++) {
+                output_file << " " << dim_z[i];
+            }
+            output_file << endl;
 
-        //Prints the heat production values of the simulation to the output file
-        output_file << " " << num_hp;
-        for(int i = 0; i < num_hp; i++) {
-            output_file << " " << scientific << heat_production_values[i]*1E6;
-        }
-        output_file << endl;
-        
-        //Prints the thermal conductivity difference values to the output file
-        output_file << " " << num_tcd;
-        for(int i = 0; i < num_tcd; i++) {
-            output_file << " " << thermal_conduct_diff[i]/14.33;
-        }
-        output_file << endl;
-        
-        //Prints the convection specific variables to the output file if convection is used
-        if(using_convection) {
-            //Prints the fluid heat capacity values to the output file
-            output_file << " " << num_hcf;
-            for(int i = 0; i < num_hcf; i++) {
-                output_file << " " << heat_capac_fluid[i];
+            //Prints the heat production values of the simulation to the output file
+            output_file << " " << num_hp;
+            for(int i = 0; i < num_hp; i++) {
+                output_file << " " << scientific << heat_production_values[i]*1E6;
             }
             output_file << endl;
             
-            //Prints the rock heat capacity values to the output file
-            output_file << " " << num_hcr;
-            for(int i = 0; i < num_hcr; i++) {
-                output_file << " " << heat_capac_rock[i];
+            //Prints the thermal conductivity difference values to the output file
+            output_file << " " << num_tcd;
+            for(int i = 0; i < num_tcd; i++) {
+                output_file << " " << thermal_conduct_diff[i]/14.33;
             }
             output_file << endl;
             
-            //Prints the minimum convection temps to the output file
-            output_file << " " << num_mtc;
-            for(int i = 0; i < num_mtc; i++) {
-                output_file << " " << min_temp_conv[i];
+            //Prints the convection specific variables to the output file if convection is used
+            if(using_convection) {
+                //Prints the fluid heat capacity values to the output file
+                output_file << " " << num_hcf;
+                for(int i = 0; i < num_hcf; i++) {
+                    output_file << " " << heat_capac_fluid[i];
+                }
+                output_file << endl;
+                
+                //Prints the rock heat capacity values to the output file
+                output_file << " " << num_hcr;
+                for(int i = 0; i < num_hcr; i++) {
+                    output_file << " " << heat_capac_rock[i];
+                }
+                output_file << endl;
+                
+                //Prints the minimum convection temps to the output file
+                output_file << " " << num_mtc;
+                for(int i = 0; i < num_mtc; i++) {
+                    output_file << " " << min_temp_conv[i];
+                }
+                output_file << endl;
+                
+                //Prints the convection velocities to the output file
+                output_file << " " << num_vel;
+                for(int i = 0; i < num_vel; i++) {
+                    output_file << " " << vel[i];
+                }
+                output_file << endl;
             }
-            output_file << endl;
             
-            //Prints the convection velocities to the output file
-            output_file << " " << num_vel;
-            for(int i = 0; i < num_vel; i++) {
-                output_file << " " << vel[i];
-            }
-            output_file << endl;
+            //Closes the output file
+            output_file.close();
         }
-        
-        //Closes the output file
-        output_file.close();
+    }
+    else {
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 1; i <= chunk_size[my_rank]; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    tmp_array[(i-1)*num_cols + j] = temp[i][j][k];
+                }
+            }
+            MPI_Send(tmp_array,num_cols*chunk_size[my_rank],MPI_REAL_VALUE,0,0,MPI_COMM_WORLD);
+        }
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 1; i <= chunk_size[my_rank]; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    code_array[(i-1)*num_cols + j] = cond_codes[i][j][k];
+                }
+            }
+            MPI_Send(code_array,num_cols*chunk_size[my_rank],MPI_INT,0,0,MPI_COMM_WORLD);
+        }
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 1; i <= chunk_size[my_rank]; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    code_array[(i-1)*num_cols + j] = conv_codes[i][j][k];
+                }
+            }
+            MPI_Send(code_array,num_cols*chunk_size[my_rank],MPI_INT,0,0,MPI_COMM_WORLD);
+        }
     }
 }
 
@@ -1389,83 +1663,102 @@ void save_surfer() {
     ofstream output_file;            //Output file stream
     ostringstream oss;
     string filename, extension;
-    filename = output_su_filename.substr(0,output_su_filename.length()-4);
-    extension = output_su_filename.substr(output_su_filename.length()-4,4);
-    
+	REAL tmp_array[chunk_size[my_rank]*num_cols];
+	REAL tmp_array1[num_rows*num_cols];
+	if(my_rank == 0) {
+		filename = output_su_filename.substr(0,output_su_filename.length()-4);
+		extension = output_su_filename.substr(output_su_filename.length()-4,4);
+    }
     for(int k = 0; k < num_slices; k++) {
-        oss.str("");
-        oss.clear();
-        oss << filename << setfill('0') << setw(su_num_width) << k << extension;
-        //Opens the output file for writting
-        output_file.open(oss.str().c_str(),ios::out);
-        if(!output_file.is_open()) {
-            cerr << "Failed to write surfer file" << endl;
-            exit(1);
-        }
-        else {
-            REAL min_temp, max_temp, temp_range;    //Minimum and maximum temperatures.
-            REAL xmax,ymin;                         //Maximum x and minimum y distances
-            
-            //Finds the minimum and maximum temps in the temperature array
-            min_temp = max_temp = temp[0][0][k];
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    if(temp[i][j][k] > max_temp) {
-                        max_temp = temp[i][j][k];
-                    }
-                    if(temp[i][j][k] < min_temp) {
-                        min_temp = temp[i][j][k];
-                    }
-                }
-            }
-            
-            //Calculates the temperature range.
-            temp_range = max_temp - min_temp;
-            if(temp_range == 0) {
-                temp_range = 1.0;
-            }
-            
-            //Calculates the maximum x distance and the
-            //minimum y distance
-            xmax = dim_x[0]*num_cols;
-            ymin = dim_y[0]*num_rows;
-            if(dim_x[0] < 0.01) {
-                xmax *= 1000;
-            }
-            else if(dim_x[0] < 0.1) {
-                xmax *= 100;
-            }
-            else if(dim_x[0] < 1) {
-                xmax *= 10;
-            }
-            if(dim_y[0] < 0.01) {
-                ymin *= 1000;
-            }
-            else if(dim_y[0] < 0.1) {
-                ymin *= 100;
-            }
-            else if(dim_y[0] < 1) {
-                ymin *= 10;
-            }
-            
-            //Prints the DSAA surfer grid parameters to the output file
-            output_file << "DSAA" << endl;
-            output_file << setw(20) << num_cols << " " << setw(20) << num_rows << endl;
-            output_file << fixed << setprecision(3) << setw(20) << 0.0 << " " << setw(20) << xmax << endl;
-            output_file << setw(20) << -ymin << " " << setw(20) << 0.0 << endl;
-            output_file << setw(20) << setprecision(OUT_PRECISION) << min_temp << " " << setw(20) << max_temp << endl;
-            
-            //Prints the temperature array to the output file
-            for(int i = num_rows-1; i >= 0; i--) {
-                for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << setw(OUT_PRECISION+5) << temp[i][j][k];
-                }
-                output_file << endl;
-            }
-            
-            //Closes the output file
-            output_file.close();
-        }
+		if(my_rank == 0) {
+			oss.str("");
+			oss.clear();
+			oss << filename << setfill('0') << setw(su_num_width) << k << extension;
+			for(int i = 0; i < chunk_size[my_rank]; i++) {
+				for(int j = 0; j < num_cols; j++) {
+					tmp_array1[i*num_cols + j] = temp[i][j][k];
+				}
+			}
+			for(int i = 1; i < comm_sz; i++) {
+				MPI_Recv(&tmp_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_REAL_VALUE,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+			}
+			//Opens the output file for writting
+			output_file.open(oss.str().c_str(),ios::out);
+			if(!output_file.is_open()) {
+				cerr << "Failed to write surfer file" << endl;
+				exit(1);
+			}
+			else {
+				REAL min_temp, max_temp, temp_range;    //Minimum and maximum temperatures.
+				REAL xmax,ymin;                         //Maximum x and minimum y distances
+				
+				//Finds the minimum and maximum temps in the temperature array
+				min_temp = max_temp = tmp_array1[0];
+				for(int i = 0; i < num_rows*num_cols; i++) {
+					if(tmp_array1[i] > max_temp) {
+						max_temp = tmp_array1[i];
+					}
+					if(tmp_array1[i] < min_temp) {
+						min_temp = tmp_array1[i];
+					}
+				}
+				
+				//Calculates the temperature range.
+				temp_range = max_temp - min_temp;
+				if(temp_range == 0) {
+					temp_range = 1.0;
+				}
+				
+				//Calculates the maximum x distance and the
+				//minimum y distance
+				xmax = dim_x[0]*num_cols;
+				ymin = dim_y[0]*num_rows;
+				if(dim_x[0] < 0.01) {
+					xmax *= 1000;
+				}
+				else if(dim_x[0] < 0.1) {
+					xmax *= 100;
+				}
+				else if(dim_x[0] < 1) {
+					xmax *= 10;
+				}
+				if(dim_y[0] < 0.01) {
+					ymin *= 1000;
+				}
+				else if(dim_y[0] < 0.1) {
+					ymin *= 100;
+				}
+				else if(dim_y[0] < 1) {
+					ymin *= 10;
+				}
+				
+				//Prints the DSAA surfer grid parameters to the output file
+				output_file << "DSAA" << endl;
+				output_file << setw(20) << num_cols << " " << setw(20) << num_rows << endl;
+				output_file << fixed << setprecision(3) << setw(20) << 0.0 << " " << setw(20) << xmax << endl;
+				output_file << setw(20) << -ymin << " " << setw(20) << 0.0 << endl;
+				output_file << setw(20) << setprecision(OUT_PRECISION) << min_temp << " " << setw(20) << max_temp << endl;
+				
+				//Prints the temperature array to the output file
+				for(int i = num_rows-1; i >= 0; i--) {
+					for(int j = 0; j < num_cols; j++) {
+						output_file << " " << setw(OUT_PRECISION+5) << tmp_array1[i*num_cols + j];
+					}
+					output_file << endl;
+				}
+				
+				//Closes the output file
+				output_file.close();
+			}
+		}
+		else {
+			for(int i = 1; i <= chunk_size[my_rank]; i++) {
+				for(int j = 0; j < num_cols; j++) {
+					tmp_array[(i-1)*num_cols + j] = temp[i][j][k];
+				}
+			}
+			MPI_Send(tmp_array,num_cols*chunk_size[my_rank],MPI_REAL_VALUE,0,0,MPI_COMM_WORLD);
+		}
     }
 }
 
@@ -1524,32 +1817,32 @@ REAL in_plane_cond(int i, int j, int k) {
     REAL heat_flow_y;
 
     /* k is fixed */
-    if(i == 0 && j == 0) { //Top left corner of slice
+    if(my_rank == 0 && i == 0 && j == 0) { //Top left corner of slice
         heat_flow_x = cond_add_x(i,j,k,i,j+1,k);
         heat_flow_y = cond_add_y(i,j,k,i+1,j,k);
         next_temp[i][j][k] = 0.0;
     }
-    else if(i == 0 && j == num_cols-1) { //Top right corner of slice
+    else if(my_rank == 0 && i == 0 && j == num_cols-1) { //Top right corner of slice
         heat_flow_x = cond_add_x(i,j,k,i,j-1,k);
         heat_flow_y = cond_add_y(i,j,k,i+1,j,k);
         next_temp[i][j][k] = 0.0;
     }
-    else if(i == 0) { //Top of slice
+    else if(my_rank == 0 && i == 0) { //Top of slice
         heat_flow_x = cond_add_x(i,j,k,i,j+1,k) + cond_add_x(i,j,k,i,j-1,k);
         heat_flow_y = cond_add_y(i,j,k,i+1,j,k);
         next_temp[i][j][k] = 0.0;
     }
-    else if(i == num_rows-1 && j == 0) { //Bottom left corner of slice
+    else if(((comm_sz == 1 && i == num_rows-1) || (my_rank == comm_sz-1 && i == chunk_size[my_rank])) && j == 0) { //Bottom left corner of slice
         heat_flow_x = cond_add_x(i,j,k,i,j+1,k);
         heat_flow_y = cond_add_y(i,j,k,i-1,j,k);
         next_temp[i][j][k] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
     }
-    else if(i == num_rows-1 && j == num_cols-1) { //Bottom right corner of slice
+    else if(((comm_sz == 1 && i == num_rows-1) || (my_rank == comm_sz-1 && i == chunk_size[my_rank])) && j == num_cols-1) { //Bottom right corner of slice
         heat_flow_x = cond_add_x(i,j,k,i,j-1,k);
         heat_flow_y = cond_add_y(i,j,k,i-1,j,k);
         next_temp[i][j][k] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
     }
-    else if(i == num_rows-1) { //Bottom
+    else if(((comm_sz == 1 && i == num_rows-1) || (my_rank == comm_sz-1 && i == chunk_size[my_rank]))) { //Bottom
         heat_flow_x = cond_add_x(i,j,k,i,j+1,k) + cond_add_x(i,j,k,i,j-1,k);
         heat_flow_y = cond_add_y(i,j,k,i-1,j,k);
         next_temp[i][j][k] = DHF/dim_y[i];    //Constant heat flow at the bottom of the model
@@ -1572,40 +1865,63 @@ REAL in_plane_cond(int i, int j, int k) {
     return (heat_flow_x + heat_flow_y);
 }
 
+void conduction_helper(int i, int j, int k) {
+    if(use_cond[i][j][k] == 1) {
+        REAL heatflow_in_plane;    //Heat flow occuring inside of plane
+        REAL heatflow_cross_plane; //Heat flow into and out of plane/slice
+        //Calculates heat flow in the X, Y, and Z direction into the current
+        //cell based on its location within the model
+        if (k == 0) { // First slice
+            heatflow_in_plane = in_plane_cond(i,j,k);         // heat transfer inside of plane
+            heatflow_cross_plane = cond_add_z(i,j,k,i,j,k+1); // slice-to-slice heat transfer.  first slice, so only from next slice transfers heat.
+        }
+        else if (k == num_slices - 1) {   // Last slice
+            heatflow_in_plane = in_plane_cond(i,j,k);         // heat transfer inside of plane
+            heatflow_cross_plane = cond_add_z(i,j,k,i,j,k-1); // slice-to-slice heat transfer.  last slice, so only previous slice transfers heat.
+        }
+        else {  // Middle
+            heatflow_in_plane = in_plane_cond(i,j,k);                                     // you get the idea
+            heatflow_cross_plane = cond_add_z(i,j,k,i,j,k+1) + cond_add_z(i,j,k,i,j,k-1); // slice-to-slice heat transfer. Middle, so both next and previous.
+        }
+        //Heat flow from the adjacent cells
+        next_temp[i][j][k] += temp[i][j][k] + time_step*(heatflow_in_plane + heatflow_cross_plane);
+        //Heat flow due to radioactive heat production
+        next_temp[i][j][k] += heat_production_values[cond_hp_index[i][j][k]]*time_step/DTC;
+    }
+    else {
+        next_temp[i][j][k] = temp[i][j][k];
+    }
+}
+
 /*
  * Updates the temperature array using 3D conduction with finite
  * difference heat flow.
  */
-void conduction(){
-    REAL heatflow_in_plane;    //Heat flow occuring inside of plane
-    REAL heatflow_cross_plane; //Heat flow into and out of plane/slice
+void conduction() {
+	for (int k = 0; k < num_slices; k++) {
+        for(int j = 0; j < num_cols; j++) {
+            conduction_helper(st_index,j,k);
+            conduction_helper(en_index-1,j,k);
+        }
+    }
+    update_cells_mpi();
     for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
+        for(int i = st_index+1; i < en_index-1; i++) {
             for(int j = 0; j < num_cols; j++) {
-                if(use_cond[i][j][k] == 1) {
-                    //Calculates heat flow in the X, Y, and Z direction into the current
-                    //cell based on its location within the model
-                    if (k == 0) { // First slice
-                        heatflow_in_plane = in_plane_cond(i,j,k);         // heat transfer inside of plane
-                        heatflow_cross_plane = cond_add_z(i,j,k,i,j,k+1); // slice-to-slice heat transfer.  first slice, so only from next slice transfers heat.
-                    }
-                    else if (k == num_slices - 1) {   // Last slice
-                        heatflow_in_plane = in_plane_cond(i,j,k);         // heat transfer inside of plane
-                        heatflow_cross_plane = cond_add_z(i,j,k,i,j,k-1); // slice-to-slice heat transfer.  last slice, so only previous slice transfers heat.
-                    }
-                    else {  // Middle
-                        heatflow_in_plane = in_plane_cond(i,j,k);                                     // you get the idea
-                        heatflow_cross_plane = cond_add_z(i,j,k,i,j,k+1) + cond_add_z(i,j,k,i,j,k-1); // slice-to-slice heat transfer. Middle, so both next and previous.
-                    }
-                    //Heat flow from the adjacent cells
-                    next_temp[i][j][k] += temp[i][j][k] + time_step*(heatflow_in_plane + heatflow_cross_plane);
-                    //Heat flow due to radioactive heat production
-                    next_temp[i][j][k] += heat_production_values[cond_hp_index[i][j][k]]*time_step/DTC;
-                }
-                else {
-                    next_temp[i][j][k] = temp[i][j][k];
-                }
+                conduction_helper(i,j,k);
             }
+        }
+    }
+    for(int i = 0; i < num_cols; i++) {
+        if(my_rank == 0 || my_rank == comm_sz - 1) {
+            MPI_Wait(&request1[i],MPI_STATUS_IGNORE);
+            MPI_Wait(&request2[i],MPI_STATUS_IGNORE);
+        }
+        else {
+            MPI_Wait(&request1[i],MPI_STATUS_IGNORE);
+            MPI_Wait(&request2[i],MPI_STATUS_IGNORE);
+            MPI_Wait(&request3[i],MPI_STATUS_IGNORE);
+            MPI_Wait(&request4[i],MPI_STATUS_IGNORE);
         }
     }
     swap_temp_array();    //Swaps the current and next temperature arrays
@@ -1624,7 +1940,8 @@ void perform_convection(int row1, int col1, int slice1, int row2, int col2, int 
     
     //Checks if the specified cell is within the bounds of the simulation and if it has a high enough
     //temperature to perform convection
-    if((row2 >= 0) && (row2 < num_rows) && (col2 >= 0) && (col2 < num_cols) && (slice2 >= 0) && (slice2 < num_slices) && (temp[row2][col2][slice2] - min_temp_conv[conv_min_temp_index[row1][col1][slice1]] >= 0)) {
+	
+    if((row2 >= 0) && ((my_rank != comm_sz-1) || ((comm_sz == 1) && (row2 < chunk_size[my_rank])) || ((comm_sz > 1) && (row2 <= chunk_size[my_rank]))) && (col2 >= 0) && (col2 < num_cols) && (slice2 >= 0) && (slice2 < num_slices) && (temp[row2][col2][slice2] - min_temp_conv[conv_min_temp_index[row1][col1][slice1]] >= 0)) {
         avg_x_dim = dist_x[col1] - dist_x[col2];
         avg_y_dim = dist_y[row1] - dist_y[row2];
         avg_z_dim = dist_z[slice1] - dist_z[slice2];
@@ -1642,121 +1959,144 @@ void perform_convection(int row1, int col1, int slice1, int row2, int col2, int 
     }
 }
 
+void convection_helper(int i, int j, int k) {
+    //Checks if convection can occur for the specified cell
+    if((conv_codes[i][j][k] <= 0) || (i == 0) || (conv_direction[i][j][k] == 5) || (conv_direction[i][j][k] < 1) || (conv_direction[i][j][k] > 27)) {
+        next_temp[i][j][k] = temp[i][j][k];
+    }
+    else {
+        //Performs convection based on the convection direction code
+        switch(conv_direction[i][j][k]) {
+             /**
+              * IN-PLANE convection -- 1 through 9. These codes are for convection taking place in the current, "k-th" plane
+              *     1   2   3
+              *     4   5   6
+              *     7   8   9
+              */
+            case 1:
+                perform_convection(i,j,k,i-1,j-1,k);
+                break;
+            case 2:                                                           
+                perform_convection(i,j,k,i-1,j,k);                      
+                break;                                                        
+            case 3:                                                  
+                perform_convection(i,j,k,i-1,j+1,k); 
+                break;
+            case 4:
+                perform_convection(i,j,k,i,j-1,k);
+                break;
+            case 6:
+                perform_convection(i,j,k,i,j+1,k);
+                break;
+            case 7:
+                perform_convection(i,j,k,i+1,j-1,k);
+                break;
+            case 8:
+                perform_convection(i,j,k,i+1,j,k);
+                break;
+            case 9:
+                perform_convection(i,j,k,i+1,j+1,k);
+                break;
+            /**
+             * CROSS-PLANE convection (previous "k-1th" plane) -- 10 through 18
+             *      10  11  12
+             *      13  14  15
+             *      16  17  18      
+             */
+            case 10:                                   
+                perform_convection(i,j,k,i-1,j-1,k-1);
+                break;
+            case 11:
+                perform_convection(i,j,k,i-1,j,k-1);                      
+                break;
+            case 12:
+                perform_convection(i,j,k,i-1,j+1,k-1); 
+                break;
+            case 13:
+                perform_convection(i,j,k,i,j-1,k-1);
+                break;
+            case 14:
+                perform_convection(i,j,k,i,j,k-1);
+                break;
+            case 15:
+                perform_convection(i,j,k,i,j+1,k-1);
+                break;
+            case 16:
+                perform_convection(i,j,k,i+1,j-1,k-1);
+                break;
+            case 17:
+                perform_convection(i,j,k,i+1,j,k-1);
+                break;
+            case 18:
+                perform_convection(i,j,k,i+1,j+1,k-1);
+                break;
+            /**
+             * CROSS-PLANE convection ("k+1th" plane) -- 19 through 27 
+             *      19  20  21
+             *      22  23  24
+             *      25  26  27
+             */
+            case 19:                                   
+                perform_convection(i,j,k,i-1,j-1,k-1);
+                break;
+            case 20:
+                perform_convection(i,j,k,i-1,j,k-1);                      
+                break;
+            case 21:
+                perform_convection(i,j,k,i-1,j+1,k-1); 
+                break;
+            case 22:
+                perform_convection(i,j,k,i,j-1,k-1);
+                break;
+            case 23:
+                perform_convection(i,j,k,i,j,k-1);
+                break;
+            case 24:
+                perform_convection(i,j,k,i,j+1,k-1);
+                break;
+            case 25:
+                perform_convection(i,j,k,i+1,j-1,k-1);
+                break;
+            case 26:
+                perform_convection(i,j,k,i+1,j,k-1);
+                break;
+            case 27:
+                perform_convection(i,j,k,i+1,j+1,k-1);
+                break;
+        }
+    }
+}
+
 /*
  * Updates the temperature array using convection
  */
-void convection() {
+void convection() { 
     //Performs the calculated number of convection updates per time step
     for(int n = 0; n < num_conv_loops; n++) {
+        for(int k = 0; k < num_slices; k++) {
+            for(int j = 0; j < num_cols; j++) {
+                convection_helper(st_index,j,k);
+                convection_helper(en_index-1,j,k);
+            }
+        }
+        update_cells_mpi();
         for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
+            for(int i = st_index+1; i < en_index-1; i++) {
                 for(int j = 0; j < num_cols; j++) {
-                    //Checks if convection can occur for the specified cell
-                    if((conv_codes[i][j][k] <= 0) || (i == 0) || (conv_direction[i][j][k] == 5) || (conv_direction[i][j][k] < 1) || (conv_direction[i][j][k] > 27)) {
-                        next_temp[i][j][k] = temp[i][j][k];
-                    }
-                    else {
-                        //Performs convection based on the convection direction code
-                        switch(conv_direction[i][j][k]) {
-                             /**
-                              * IN-PLANE convection -- 1 through 9. These codes are for convection taking place in the current, "k-th" plane
-                              *     1   2   3
-                              *     4   5   6
-                              *     7   8   9
-                              */
-                            case 1:
-                                perform_convection(i,j,k,i-1,j-1,k);
-                                break;
-                            case 2:                                                           
-                                perform_convection(i,j,k,i-1,j,k);                      
-                                break;                                                        
-                            case 3:                                                  
-                                perform_convection(i,j,k,i-1,j+1,k); 
-                                break;
-                            case 4:
-                                perform_convection(i,j,k,i,j-1,k);
-                                break;
-                            case 6:
-                                perform_convection(i,j,k,i,j+1,k);
-                                break;
-                            case 7:
-                                perform_convection(i,j,k,i+1,j-1,k);
-                                break;
-                            case 8:
-                                perform_convection(i,j,k,i+1,j,k);
-                                break;
-                            case 9:
-                                perform_convection(i,j,k,i+1,j+1,k);
-                                break;
-                            /**
-                             * CROSS-PLANE convection (previous "k-1th" plane) -- 10 through 18
-                             *      10  11  12
-                             *      13  14  15
-                             *      16  17  18      
-                             */
-                            case 10:                                   
-                                perform_convection(i,j,k,i-1,j-1,k-1);
-                                break;
-                            case 11:
-                                perform_convection(i,j,k,i-1,j,k-1);                      
-                                break;
-                            case 12:
-                                perform_convection(i,j,k,i-1,j+1,k-1); 
-                                break;
-                            case 13:
-                                perform_convection(i,j,k,i,j-1,k-1);
-                                break;
-                            case 14:
-                                perform_convection(i,j,k,i,j,k-1);
-                                break;
-                            case 15:
-                                perform_convection(i,j,k,i,j+1,k-1);
-                                break;
-                            case 16:
-                                perform_convection(i,j,k,i+1,j-1,k-1);
-                                break;
-                            case 17:
-                                perform_convection(i,j,k,i+1,j,k-1);
-                                break;
-                            case 18:
-                                perform_convection(i,j,k,i+1,j+1,k-1);
-                                break;
-                            /**
-                             * CROSS-PLANE convection ("k+1th" plane) -- 19 through 27 
-                             *      19  20  21
-                             *      22  23  24
-                             *      25  26  27
-                             */
-                            case 19:                                   
-                                perform_convection(i,j,k,i-1,j-1,k-1);
-                                break;
-                            case 20:
-                                perform_convection(i,j,k,i-1,j,k-1);                      
-                                break;
-                            case 21:
-                                perform_convection(i,j,k,i-1,j+1,k-1); 
-                                break;
-                            case 22:
-                                perform_convection(i,j,k,i,j-1,k-1);
-                                break;
-                            case 23:
-                                perform_convection(i,j,k,i,j,k-1);
-                                break;
-                            case 24:
-                                perform_convection(i,j,k,i,j+1,k-1);
-                                break;
-                            case 25:
-                                perform_convection(i,j,k,i+1,j-1,k-1);
-                                break;
-                            case 26:
-                                perform_convection(i,j,k,i+1,j,k-1);
-                                break;
-                            case 27:
-                                perform_convection(i,j,k,i+1,j+1,k-1);
-                                break;
-                        }
-                    }
+                    convection_helper(i,j,k);
                 }
+            }
+        }
+        for(int i = 0; i < num_cols; i++) {
+            if(my_rank == 0 || my_rank == comm_sz - 1) {
+                MPI_Wait(&request1[i],MPI_STATUS_IGNORE);
+                MPI_Wait(&request2[i],MPI_STATUS_IGNORE);
+            }
+            else {
+                MPI_Wait(&request1[i],MPI_STATUS_IGNORE);
+                MPI_Wait(&request2[i],MPI_STATUS_IGNORE);
+                MPI_Wait(&request3[i],MPI_STATUS_IGNORE);
+                MPI_Wait(&request4[i],MPI_STATUS_IGNORE);
             }
         }
         swap_temp_array();    //Swaps the current and next temperature arrays
@@ -1879,6 +2219,18 @@ void update_moving_sources() {
     }
 }
 
+
+void usage() {
+    cerr << "Arguments: " << endl;
+    cerr << "   --input_filename       :       The filename of the input file" << endl;
+    cerr << "   --surfer_filename      :       The filename of the output surfer file" << endl;
+    cerr << "   --output_filename      :       The filename of the output state file" << endl;
+    cerr << "   --save_result          :       Flag indicating if the final state of the simulation should be saved" << endl;
+    cerr << "   --time_step            :       The new timestep of the model" << endl;
+    cerr << "   --run_time             :       The run time of the simulation" << endl;
+    cerr << "   --num_loops            :       The number of loops between screen updates" << endl;
+}
+
 /*
  * Performs a finite heat flow simulation using
  * conduction and convection.
@@ -1894,20 +2246,89 @@ int main(int argc, char **argv) {
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
     }
 #else
-	cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
+
 #endif
     int input_val;    //Temporary int value
-    REAL temp_val;    //Temporary REAL value
+    REAL temp_val = -1;    //Temporary REAL value
     
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--input_filename") == 0) {
+            source_filename = argv[++i];
+        } else if (strcmp(argv[i], "--surfer_filename") == 0) {
+            output_su_filename = argv[++i];
+        } else if (strcmp(argv[i], "--output_filename") == 0) {
+            output_filename = argv[++i];
+        } else if (strcmp(argv[i], "--save_result") == 0) {
+            save_result = 1;
+        } else if (strcmp(argv[i], "--time_step") == 0) {
+            temp_val = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--run_time") == 0) {
+            run_time = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--num_loops") == 0) {
+            num_loops = atoi(argv[++i]);
+        } else {
+            cerr << "Unknown argument " << argv[i] << endl;
+            usage();
+            exit(0);
+        }
+    }
     
+    if(source_filename.size() < 5) {
+        cerr << "incorrect input filename specified" << endl;
+        exit(0);
+    }
     
+    if(output_su_filename.size() == 0) {
+        cerr << "incorrect surfer filename specified" << endl;
+        exit(0);
+    }
+    
+    if(save_result == 1 && output_filename.size() == 0) {
+        cerr << "Output filename not specified, exiting program" << endl;
+        exit(0);
+    }
+    
+    if(temp_val <= 0) {
+        cerr << "Time step not specified" << endl;
+        exit(0);
+    }
+    
+    if(run_time <= 0) {
+        cerr << "Run time not specified" << endl;
+        exit(0);
+    }
+    
+    if(num_loops <= 0) {
+        cerr << "Number of loops not specified" << endl;
+        exit(0);
+    }
+    
+    MPI_Init(NULL, NULL);						//Initializes MPI
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);	//Retrieves the number of processes running
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);	//Retrieves the rank of the current process	
+    
+	if(my_rank == 0) {
+		cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
+    }
+	
     //Loads the input file for the simulation
     load_file();
-
+#ifdef TIME
+    if(my_rank == 0) {
+#ifdef _WIN32
+        GetSystemTime(&end);
+        cout << "Load and allocate time : " << (end.wHour-start.wHour)*3600.0 + (end.wMinute-start.wMinute)*60.0 + (end.wSecond-start.wSecond) + (end.wMilliseconds-start.wMilliseconds)/1000.0 << endl;
+#else
+        gettimeofday(&end, NULL);
+        cout << "Load and allocate time : " << (end.tv_sec  - start.tv_sec) + (end.tv_usec - start.tv_usec)/1e6 << endl;
+#endif
+    }
+#endif
     /*
      * Allows the user to change multiple rectangular blocks of temperatures
      * within the model
      */
+	 /*
     cout << endl << endl << "To Change the Temp. on a Block, Enter 1, Else 0: ";
     while(!(cin >> input_val) || input_val < 0 || input_val > 1) {
 		clear_cin();
@@ -1959,6 +2380,7 @@ int main(int argc, char **argv) {
     /*
      * Allows the user to start one or more moving sources.
      */
+	 /*
     cout << endl << endl << "To Start One or More Moving Sources Enter 1, Else Enter 0: ";
     while(!(cin >> using_moving_source) || using_moving_source < 0 || using_moving_source > 1) {
         clear_cin();
@@ -2039,17 +2461,24 @@ int main(int argc, char **argv) {
             update_mvsrc(i);
         }
     }
-    
+    */
+	
     //Allows the user to decrease the size of the time step
-    cout << endl << endl << "Each Iteration in Time Spans " << scientific << time_step << " Years" << endl;
-    cout << "Enter a Shorter Iteration Time in Years if Desired (any larger number otherwise): ";
-    while(!(cin >> temp_val) || temp_val <= 0) {
-        clear_cin();
-        cout << "Incorrect input, enter a number greater than 0: ";
-    }
-    if(temp_val < time_step) {
-        time_step = temp_val;
-    }
+	if(my_rank == 0) {
+		cout << endl << endl << "Each Iteration in Time Spans " << scientific << time_step << " Years" << endl;
+		cout << "Enter a Shorter Iteration Time in Years if Desired (any larger number otherwise): " << temp_val << endl;
+		/*while(!(cin >> temp_val) || temp_val <= 0) {
+			clear_cin();
+			cout << "Incorrect input, enter a number greater than 0: ";
+		}*/
+		if(temp_val < time_step) {
+			time_step = temp_val;
+		}
+		MPI_Bcast(&time_step,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+	}
+	else {
+		MPI_Bcast(&time_step,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+	}
     
     DHF = chf * QFAC * time_step;
 
@@ -2072,54 +2501,79 @@ int main(int argc, char **argv) {
     }
     
     //Asks the user for the runtime of the simulation
-    thermal_time_constant = min_row_dim*min_row_dim/max_thermal_conduct_diff;
-    cout << endl << endl << "The Thermal Time Constant for the Vertical Dimension is " << thermal_time_constant << " Years" << endl;
-    cout << "Enter Time Duration for Calculation in Years: ";
-    while(!(cin >> run_time) || run_time <= 0) {
-        clear_cin();
-        cout << "Incorrect input, enter a number greater than 0: ";
+	if(my_rank == 0) {
+		thermal_time_constant = min_row_dim*min_row_dim/max_thermal_conduct_diff;
+		cout << endl << endl << "The Thermal Time Constant for the Vertical Dimension is " << thermal_time_constant << " Years" << endl;
+		cout << "Enter Time Duration for Calculation in Years: " << run_time << endl;
+		/*
+		while(!(cin >> run_time) || run_time <= 0) {
+			clear_cin();
+			cout << "Incorrect input, enter a number greater than 0: ";
+		}*/
+		MPI_Bcast(&run_time,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+		
+		//Asks the user for the number of loops to perform between screen updates
+		cout << endl << endl << "Enter the Number of Loops Between Screen Updates: " << num_loops << endl;
+		/*while(!(cin >> num_loops) || num_loops <= 0) {
+			clear_cin();
+			cout << "Incorrect input, enter a number greater than 0: ";
+		}*/
+		
+		MPI_Bcast(&num_loops,1,MPI_INT,0,MPI_COMM_WORLD);
+		/*cout << endl << endl << "To have the simulation stop once the temperature change meets a tolerance, Enter 1 otherwise 0: ";
+		while(!(cin >> use_tolerance) || use_tolerance < 0 || use_tolerance > 1) {
+			clear_cin();
+			cout << "Incorrect Input, Enter 1 to use a tolerance, Else 0: ";
+		}*/
+		use_tolerance = 0;
+		MPI_Bcast(&use_tolerance,1,MPI_INT,0,MPI_COMM_WORLD);
+		if(use_tolerance == 1) {
+			cout << endl << "Enter the tolerance: ";
+			while(!(cin >> tolerance) || tolerance  <= 0) {
+				clear_cin();
+				cout << "Incorrect input, enter a number greater than 0: ";
+			}
+		}
+		MPI_Bcast(&tolerance,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
     }
-    
-    //Asks the user for the number of loops to perform between screen updates
-    cout << endl << endl << "Enter the Number of Loops Between Screen Updates: ";
-    while(!(cin >> num_loops) || num_loops <= 0) {
-        clear_cin();
-        cout << "Incorrect input, enter a number greater than 0: ";
-    }
-    
-    cout << endl << endl << "To have the simulation stop once the temperature change meets a tolerance, Enter 1 otherwise 0: ";
-    while(!(cin >> use_tolerance) || use_tolerance < 0 || use_tolerance > 1) {
-        clear_cin();
-        cout << "Incorrect Input, Enter 1 to use a tolerance, Else 0: ";
-    }
-    if(use_tolerance == 1) {
-        cout << endl << "Enter the tolerance: ";
-        while(!(cin >> tolerance) || tolerance  <= 0) {
-            clear_cin();
-            cout << "Incorrect input, enter a number greater than 0: ";
-        }
-    }
-    
+	else {
+		MPI_Bcast(&run_time,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+		MPI_Bcast(&num_loops,1,MPI_INT,0,MPI_COMM_WORLD);
+		MPI_Bcast(&use_tolerance,1,MPI_INT,0,MPI_COMM_WORLD);
+		MPI_Bcast(&tolerance,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+	}
     //Initializes the simulation time to 0.0
     sim_time = 0.0;
     
+    //Calculates the starting and ending index for each mpi process
+    if(my_rank == 0) {
+		st_index = 0;
+		en_index = chunk_size[my_rank];
+	}
+	else {
+		st_index = 1;
+		en_index = chunk_size[my_rank]+1;
+	}
+    
+	/*
     //Waits for the user to hit enter before beginning the simulation
     cout << endl;
     cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
     PressEnterToContinue();
-    
+	*/
     /*
      * The main loop of the simulation
      */
     count = 0;    //Number of loops performed
-    cout << endl << endl << num_loops << " loops between screen updates" << endl << endl;
-    if(use_tolerance == 0) {
-        cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << endl;
-    }
-    else {
-        cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << setw(20) << "Max temp diff" << endl;
-    }
-
+	if(my_rank == 0) {
+		cout << endl << endl << num_loops << " loops between screen updates" << endl << endl;
+		if(use_tolerance == 0) {
+			cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << endl;
+		}
+		else {
+			cout << setw(15) << "num loops" << setw(20) << "run time (years)" << setw(20) << "sim time (years)" << setw(20) << "Max temp diff" << endl;
+		}
+	}
 #ifdef DISPLAY
 	if(display_mode == 1) {
 		array_minmax();
@@ -2173,23 +2627,34 @@ int main(int argc, char **argv) {
             gluLookAt(num_cols/2.0,num_rows*0.1,num_cols,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
         }
 		glutMainLoop();
-        clear_cin();
-		PressEnterToContinue();
+		//PressEnterToContinue();
 	}
 	else {
 #endif
+        MPI_Barrier(MPI_COMM_WORLD);
+#ifdef TIME
+        if(my_rank == 0) {
+#ifdef _WIN32
+            GetSystemTime(&start);
+#else
+            gettimeofday(&start, NULL);
+#endif
+        }
+#endif
         while(sim_time <= run_time) {
-            //Displays status information for the current loop
-            if(count%num_loops == 0) {
-                if(use_tolerance == 0) {
-                    cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
-                }
-                else {
-                    cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << setw(20) << max_temp_diff << endl;
-                }
-                //Saves the current state of the simulation if the save_state flag is set
-                if(save_state) {
-                    save_model_state();
+            if(my_rank == 0) {
+                //Displays status information for the current loop
+                if(count%num_loops == 0) {
+                    if(use_tolerance == 0) {
+                        cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
+                    }
+                    else {
+                        cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << setw(20) << max_temp_diff << endl;
+                    }
+                    //Saves the current state of the simulation if the save_state flag is set
+                    /*if(save_state) {
+                        save_model_state();
+                    }*/
                 }
             }
             
@@ -2200,11 +2665,11 @@ int main(int argc, char **argv) {
             
             //Performs conduction calculations
             conduction();
-            
             //Increments the simulation time and loop count
             sim_time += time_step;
             count++;
             
+            /*
             if(use_tolerance == 1) {
                 max_temp_diff = find_max_temp_diff();
                 if(max_temp_diff < tolerance) {
@@ -2213,23 +2678,51 @@ int main(int argc, char **argv) {
                 }
             }
 
+            
             //Updates the moving source
             if(using_moving_source == 1) {
                 update_moving_sources();
             }
+            */
         }
-
+        
+    
         //Saves the final result of the simulation
         if(save_state == 1 || save_result == 1) {
             save_model_state();
         }
+        
         save_surfer();
 
-        //Waits for the user to hit enter before ending the simulation
-        cout << endl << "Simulation Complete" << endl;
-        PressEnterToContinue();
+        if(my_rank == 0) {
+            //Waits for the user to hit enter before ending the simulation
+            cout << endl << "Simulation Complete" << endl;
+            //PressEnterToContinue();
+        }
+
         deallocate_memory();
+       
+        MPI_Barrier(MPI_COMM_WORLD);
+
+#ifdef TIME
+        if(my_rank == 0) {
+#ifdef _WIN32
+            GetSystemTime(&end);
+            cout << "run time : " << (end.wHour-start.wHour)*3600.0 + (end.wMinute-start.wMinute)*60.0 + (end.wSecond-start.wSecond) + (end.wMilliseconds-start.wMilliseconds)/1000.0 << endl;
+#else
+            gettimeofday(&end, NULL);
+            cout << "run time : " << (end.tv_sec  - start.tv_sec) + (end.tv_usec - start.tv_usec)/1e6 << endl;
+#endif
+        }
+#endif
+        
+        //Finalizes the MPI program.
+        if(my_rank == 0) {
+            MPI_Finalize();
+        }
+
+        
 #ifdef DISPLAY
 	}
-#endif        
+#endif
 }

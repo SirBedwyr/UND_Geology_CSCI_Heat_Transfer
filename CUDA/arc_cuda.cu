@@ -852,7 +852,13 @@ void keyboard(unsigned char key, int x, int y) {
 			glMatrixMode(GL_PROJECTION);
 			glLoadIdentity();
 			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            if(num_rows > num_cols) {
+		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
+            else {
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
 		}
 		break;
 	case '+':
@@ -863,7 +869,13 @@ void keyboard(unsigned char key, int x, int y) {
 			glMatrixMode(GL_PROJECTION);
 			glLoadIdentity();
 			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            if(num_rows > num_cols) {
+		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
+            else {
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
 		}
 		break;
 	case 'x':
@@ -887,7 +899,13 @@ void keyboardSpecial(int key, int x, int y) {
 			glMatrixMode(GL_PROJECTION);
 			glLoadIdentity();
 			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            if(num_rows > num_cols) {
+		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
+            else {
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
 		}
 		break;
 
@@ -899,7 +917,13 @@ void keyboardSpecial(int key, int x, int y) {
 			glMatrixMode(GL_PROJECTION);
 			glLoadIdentity();
 			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            if(num_rows > num_cols) {
+		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
+            else {
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+            }
 		}
 		break;
 	default:
@@ -1775,7 +1799,7 @@ __device__ REAL in_plane_cond(int i, int j, int k, int num_rows, int num_cols, i
  * Updates the temperature array using 3D conduction with finite
  * difference heat flow.
  */
-__global__ void conduciton_kernel(int num_cells, int num_rows, int num_cols, int num_slices, REAL *dim_x, REAL *dim_y, REAL *dim_z, REAL DHF, REAL time_step, REAL *temp, REAL *next_temp, int *use_cond, REAL *heat_production_values, int *cond_hp_index, REAL *thermal_conduct_diff, int *cond_tc_index){
+__global__ void conduction_kernel(int num_cells, int num_rows, int num_cols, int num_slices, REAL *dim_x, REAL *dim_y, REAL *dim_z, REAL DHF, REAL time_step, REAL *temp, REAL *next_temp, int *use_cond, REAL *heat_production_values, int *cond_hp_index, REAL *thermal_conduct_diff, int *cond_tc_index){
     unsigned long long id = blockIdx.x*blockDim.x+threadIdx.x;		//Thread ID
     if(id < num_cells) {
         int k = id/(num_rows*num_cols);
@@ -1814,7 +1838,7 @@ __global__ void conduciton_kernel(int num_cells, int num_rows, int num_cols, int
 void conduction_cuda() {
 
     //Calls the conduction kernel
-    conduciton_kernel<<<dimGrid,dimBlock>>>(num_cells,num_rows,num_cols,num_slices,dev_dim_x,dev_dim_y,dev_dim_z,DHF,time_step,dev_temp,dev_next_temp,dev_use_cond,dev_heat_production_values,dev_cond_hp_index,dev_thermal_conduct_diff,dev_cond_tc_index);
+    conduction_kernel<<<dimGrid,dimBlock>>>(num_cells,num_rows,num_cols,num_slices,dev_dim_x,dev_dim_y,dev_dim_z,DHF,time_step,dev_temp,dev_next_temp,dev_use_cond,dev_heat_production_values,dev_cond_hp_index,dev_thermal_conduct_diff,dev_cond_tc_index);
     
     //Waits for the kernel to finish executing
     cudaThreadSynchronize();
@@ -2437,8 +2461,14 @@ int main(int argc, char **argv) {
 		camera_rot_lag[0] = 28.0;
 		*/
 
-		gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
-		glutMainLoop();
+		//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
+		if(num_rows > num_cols) {
+            gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
+        }
+        else {
+            gluLookAt(num_cols/2.0,num_rows*0.1,num_cols,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
+        }
+        glutMainLoop();
 		PressEnterToContinue();
 	}
 	else {

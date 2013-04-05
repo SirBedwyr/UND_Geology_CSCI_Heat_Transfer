@@ -130,7 +130,21 @@ int main(int argc, char **argv) {
                 out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(1,1).c_str());
                 out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(2,1).c_str());
                 out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(3,1).c_str());
-                out_file << setw(2) << atoi(temp_str.substr(4,1).c_str());
+                if(atoi(temp_str.substr(4,1).c_str()) == 1) {
+                    out_file << setw(INDEX_WIDTH) << 2;
+                }
+                else if(atoi(temp_str.substr(4,1).c_str()) == 2) {
+                    out_file << setw(INDEX_WIDTH) << 1;
+                }
+                else if(atoi(temp_str.substr(4,1).c_str()) == 8) {
+                    out_file << setw(INDEX_WIDTH) << 9;
+                }
+                else if(atoi(temp_str.substr(4,1).c_str()) == 9) {
+                    out_file << setw(INDEX_WIDTH) << 8;
+                }
+                else {
+                    out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(4,1).c_str());
+                }
             }
             out_file << endl;
         }
