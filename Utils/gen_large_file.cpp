@@ -202,55 +202,7 @@ void load_file() {
             cond_codes[i][j] = new int[num_slices];
         }
     }
-    //Reads in the starting temperatures of the simulation from the input file
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-                source_file >> temp[i][j][k];
-            }
-        }
-    }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
-
-    //Reads in the conduction codes for each cell of the simulation and parses
-    //the array indexs from the codes
-    //Unlike, the Fortran version of the program, the conduction direction codes
-    //are ignored since the simulation accounts for them internally
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-                source_file >> temp_str;
-                cond_codes[i][j][k] = atoi(temp_str.c_str());
-            }
-        }
-    }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
-
-    //If convection is used for the user specified input file, memory is allocated for its
-    //variables and they are read in from the input file
-    if(using_convection) {     
-        //Allocates memory for the convection variables based on the previously read in simulation
-        //parameters
-        conv_codes = new int**[num_rows];
-        for(int i = 0; i < num_rows; i++) {
-            conv_codes[i] = new int*[num_cols];
-            for (int j = 0; j < num_cols; j++) {
-                conv_codes[i][j] = new int[num_slices];
-            }
-        }
-        
-        //Reads in the convection codes for each cell of the simulation and parses the array
-        //indexs from the ocdes
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    source_file >> temp_str;
-                    conv_codes[i][j][k] = atoi(temp_str.c_str());
-                }
-            }
-        }
-        cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
-    }
+    
     //Reads in the Y (column) dimensions and finds the minimum column distance
     for(int i = 0; i < num_cols; i++) {
         source_file >> dim_x[i];
@@ -316,6 +268,56 @@ void load_file() {
 
     }
     
+    //Reads in the starting temperatures of the simulation from the input file
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                source_file >> temp[i][j][k];
+            }
+        }
+    }
+    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
+
+    //Reads in the conduction codes for each cell of the simulation and parses
+    //the array indexs from the codes
+    //Unlike, the Fortran version of the program, the conduction direction codes
+    //are ignored since the simulation accounts for them internally
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                source_file >> temp_str;
+                cond_codes[i][j][k] = atoi(temp_str.c_str());
+            }
+        }
+    }
+    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
+
+    //If convection is used for the user specified input file, memory is allocated for its
+    //variables and they are read in from the input file
+    if(using_convection) {     
+        //Allocates memory for the convection variables based on the previously read in simulation
+        //parameters
+        conv_codes = new int**[num_rows];
+        for(int i = 0; i < num_rows; i++) {
+            conv_codes[i] = new int*[num_cols];
+            for (int j = 0; j < num_cols; j++) {
+                conv_codes[i][j] = new int[num_slices];
+            }
+        }
+        
+        //Reads in the convection codes for each cell of the simulation and parses the array
+        //indexs from the ocdes
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 0; i < num_rows; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    source_file >> temp_str;
+                    conv_codes[i][j][k] = atoi(temp_str.c_str());
+                }
+            }
+        }
+        cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
+    }
+    
     //Closes the input file
     source_file.close();
 
@@ -340,46 +342,6 @@ void save_model_state() {
         output_file << setw(20) << new_num_rows << " " << setw(20) << new_num_cols << " " << setw(20) << new_num_slices << setw(20) << using_convection << endl;
         output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf << " " << setw(20) << initial_time << endl;
         output_file << title << endl;
-        
-        output_file << setprecision(OUT_PRECISION);
-        //Prints the current temperature array of the simulation
-        for (int k = 0; k < new_num_slices; k++) {
-            for(int i = 0; i < new_num_rows; i++) {
-                for(int j = 0; j < new_num_cols; j++) {
-                    output_file << " " << setw(OUT_PRECISION+5) << temp[i%num_rows][j%num_cols][k%num_slices];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
-        }
-		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " temps" << endl; 
-        
-        //Prints the conduction codes of the simulation to the output file
-        output_file << setfill('0');
-        for (int k = 0; k < new_num_slices; k++) {
-            for(int i = 0; i < new_num_rows; i++) {
-                for(int j = 0; j < new_num_cols; j++) {
-                    output_file << " " << setw(2*INDEX_WIDTH+1) << cond_codes[i%num_rows][j%num_cols][k%num_slices];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
-        }
-		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " conduction codes" << endl; 
-        
-        //Prints the convection codes to the output file if convection is being used
-        if(using_convection) {
-            for (int k = 0; k < new_num_slices; k++) {
-				for(int i = 0; i < new_num_rows; i++) {
-					for(int j = 0; j < new_num_cols; j++) {
-                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i%num_rows][j%num_cols][k%num_slices];
-                    }
-                    output_file << endl;
-                }
-                output_file << endl;
-            }
-        }
-		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " convection codes" << endl; 
         
         output_file << setfill(' ');
         output_file << setprecision(3);
@@ -446,6 +408,47 @@ void save_model_state() {
             }
             output_file << endl;
         }
+        
+        output_file << setprecision(OUT_PRECISION) << fixed;
+        output_file << endl;
+        //Prints the current temperature array of the simulation
+        for (int k = 0; k < new_num_slices; k++) {
+            for(int i = 0; i < new_num_rows; i++) {
+                for(int j = 0; j < new_num_cols; j++) {
+                    output_file << " " << setw(OUT_PRECISION+5) << temp[i%num_rows][j%num_cols][k%num_slices];
+                }
+                output_file << endl;
+            }
+            output_file << endl;
+        }
+		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " temps" << endl; 
+        
+        //Prints the conduction codes of the simulation to the output file
+        output_file << setfill('0');
+        for (int k = 0; k < new_num_slices; k++) {
+            for(int i = 0; i < new_num_rows; i++) {
+                for(int j = 0; j < new_num_cols; j++) {
+                    output_file << " " << setw(2*INDEX_WIDTH+1) << cond_codes[i%num_rows][j%num_cols][k%num_slices];
+                }
+                output_file << endl;
+            }
+            output_file << endl;
+        }
+		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " conduction codes" << endl; 
+        
+        //Prints the convection codes to the output file if convection is being used
+        if(using_convection) {
+            for (int k = 0; k < new_num_slices; k++) {
+				for(int i = 0; i < new_num_rows; i++) {
+					for(int j = 0; j < new_num_cols; j++) {
+                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i%num_rows][j%num_cols][k%num_slices];
+                    }
+                    output_file << endl;
+                }
+                output_file << endl;
+            }
+        }
+		cout << "Wrote " << new_num_rows << " X " << new_num_cols << " X " << new_num_slices << " convection codes" << endl; 
         
         //Closes the output file
         output_file.close();

@@ -52,6 +52,9 @@ int main(int argc, char **argv) {
     int num_cols;           //The number of columns for the simulation
     int num_slices = 1;     //Total number of slices to form the 3d simulation (one 'slice' has dimension rows x columns)
     int using_convection;   //Indicates if convection is being used
+    REAL **temp;
+    string **cond_codes;
+    string **conv_codes;
     
     //Opens the input file for reading
     //Exits the program if it fails to open
@@ -92,63 +95,33 @@ int main(int argc, char **argv) {
     getline(in_file,title);
     out_file << title << endl;
     
-    //Temperatures
-    out_file << setprecision(OUT_PRECISION);
+    temp = new REAL*[num_rows];
+    cond_codes = new string*[num_rows];
+    conv_codes = new string*[num_rows];
     for(int i = 0; i < num_rows; i++) {
-        for(int j = 0; j < num_cols; j++) {
-            in_file >> temp_real;
-            out_file << " " << setw(OUT_PRECISION+5) << temp_real;
-        }
-        out_file << endl;
+        temp[i] = new REAL[num_cols];
+        cond_codes[i] = new string[num_cols];
+        conv_codes[i] = new string[num_cols];
     }
-    out_file << endl;
     
-    //Conduction Codes
-    out_file << setfill('0');
     for(int i = 0; i < num_rows; i++) {
         for(int j = 0; j < num_cols; j++) {
-            in_file >> temp_str;
-            temp_int = atoi(temp_str.substr(2,2).c_str());
-            out_file << " " << setw(INDEX_WIDTH) << atoi(temp_str.substr(0,1).c_str()) << setw(INDEX_WIDTH) << atoi(temp_str.substr(1,1).c_str());
-            if(temp_int == 2) {
-                out_file << setw(1) << 0;
-            }
-            else {
-                out_file << setw(1) << 1;
-            }
+            in_file >> temp[i][j];
         }
-        out_file << endl;
     }
-    out_file << endl;
+    
+    for(int i = 0; i < num_rows; i++) {
+        for(int j = 0; j < num_cols; j++) {
+            in_file >> cond_codes[i][j];
+        }
+    }
     
     if(using_convection) {
-        //Convection Codes
         for(int i = 0; i < num_rows; i++) {
             for(int j = 0; j < num_cols; j++) {
-                in_file >> temp_str;
-                out_file << " " << setw(INDEX_WIDTH) << atoi(temp_str.substr(0,1).c_str()); 
-                out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(1,1).c_str());
-                out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(2,1).c_str());
-                out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(3,1).c_str());
-                if(atoi(temp_str.substr(4,1).c_str()) == 1) {
-                    out_file << setw(INDEX_WIDTH) << 2;
-                }
-                else if(atoi(temp_str.substr(4,1).c_str()) == 2) {
-                    out_file << setw(INDEX_WIDTH) << 1;
-                }
-                else if(atoi(temp_str.substr(4,1).c_str()) == 8) {
-                    out_file << setw(INDEX_WIDTH) << 9;
-                }
-                else if(atoi(temp_str.substr(4,1).c_str()) == 9) {
-                    out_file << setw(INDEX_WIDTH) << 8;
-                }
-                else {
-                    out_file << setw(INDEX_WIDTH) << atoi(temp_str.substr(4,1).c_str());
-                }
+                in_file >> conv_codes[i][j];
             }
-            out_file << endl;
         }
-        out_file << endl;
     }
     
     out_file << setprecision(3) << setfill(' ');
@@ -219,7 +192,74 @@ int main(int argc, char **argv) {
         out_file << endl;
     }
     
+    
+    //Temperatures
+    out_file << setprecision(OUT_PRECISION) << fixed;
+    out_file << endl;
+    for(int i = 0; i < num_rows; i++) {
+        for(int j = 0; j < num_cols; j++) {
+            out_file << " " << setw(OUT_PRECISION+5) << temp[i][j];
+        }
+        out_file << endl;
+    }
+    out_file << endl;
+    
+    //Conduction Codes
+    out_file << setfill('0');
+    for(int i = 0; i < num_rows; i++) {
+        for(int j = 0; j < num_cols; j++) {
+            temp_int = atoi(cond_codes[i][j].substr(2,2).c_str());
+            out_file << " " << setw(INDEX_WIDTH) << atoi(cond_codes[i][j].substr(0,1).c_str()) << setw(INDEX_WIDTH) << atoi(cond_codes[i][j].substr(1,1).c_str());
+            if(temp_int == 2) {
+                out_file << setw(1) << 0;
+            }
+            else {
+                out_file << setw(1) << 1;
+            }
+        }
+        out_file << endl;
+    }
+    out_file << endl;
+    
+    if(using_convection) {
+        //Convection Codes
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                out_file << " " << setw(INDEX_WIDTH) << atoi(conv_codes[i][j].substr(0,1).c_str()); 
+                out_file << setw(INDEX_WIDTH) << atoi(conv_codes[i][j].substr(1,1).c_str());
+                out_file << setw(INDEX_WIDTH) << atoi(conv_codes[i][j].substr(2,1).c_str());
+                out_file << setw(INDEX_WIDTH) << atoi(conv_codes[i][j].substr(3,1).c_str());
+                if(atoi(conv_codes[i][j].substr(4,1).c_str()) == 1) {
+                    out_file << setw(INDEX_WIDTH) << 2;
+                }
+                else if(atoi(conv_codes[i][j].substr(4,1).c_str()) == 2) {
+                    out_file << setw(INDEX_WIDTH) << 1;
+                }
+                else if(atoi(conv_codes[i][j].substr(4,1).c_str()) == 8) {
+                    out_file << setw(INDEX_WIDTH) << 9;
+                }
+                else if(atoi(conv_codes[i][j].substr(4,1).c_str()) == 9) {
+                    out_file << setw(INDEX_WIDTH) << 8;
+                }
+                else {
+                    out_file << setw(INDEX_WIDTH) << atoi(conv_codes[i][j].substr(4,1).c_str());
+                }
+            }
+            out_file << endl;
+        }
+        out_file << endl;
+    }
+    
     //Close the input files
     in_file.close();
     out_file.close();
+    
+    for(int i = 0; i < num_rows; i++) {
+        delete[] temp[i];
+        delete[] cond_codes[i];
+        delete[] conv_codes[i];
+    }
+    delete[] temp;
+    delete[] cond_codes;
+    delete[] conv_codes;
 }

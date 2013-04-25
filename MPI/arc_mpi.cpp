@@ -63,6 +63,7 @@ using std::string;
 using std::ofstream;
 using std::ifstream;
 using std::ostringstream;
+using std::stringstream;
 using std::setw;
 using std::right;
 using std::left;
@@ -92,6 +93,7 @@ MPI_Request *request1;
 MPI_Request *request2;
 MPI_Request *request3;
 MPI_Request *request4;
+REAL temp_time_step;
 
 //Conduction code specific variables
 int ***cond_codes;              //The unmodified conduction codes as read from the input file
@@ -991,7 +993,9 @@ void swap_temp_array() {
 void load_file() {
     ifstream source_file;       //Input file stream
     string temp_str;
-    ostringstream str_conv;
+    stringstream stringBuffer;
+    REAL min_dim;
+    REAL tmp_real;
 	char tmp[500];
     
     //Ask for the input file names and displays an error message
@@ -1109,202 +1113,20 @@ void load_file() {
     
     if(my_rank == 0) {
 		//Calculates the number of characters for the surfer file index
-		str_conv << num_slices;
-		su_num_width = str_conv.str().length();
+		stringBuffer.str("");
+        stringBuffer.clear();
+        stringBuffer << num_slices;
+        su_num_width = stringBuffer.str().length();
     }
 	
-    //Calculates the chunk size and row displacements
-	double count = 0.0; 
-    double prev_count;
-    chunk_size = new int[comm_sz];
-	displacements = new int[comm_sz];
-	int sum = 0;
-    for(int i = 0; i < comm_sz; i++) {
-		displacements[i] = (int)count;
-        prev_count = count;
-        count += (double)num_rows / (double)comm_sz;
-        chunk_size[i] = (int)count - (int)prev_count;
-		sum += chunk_size[i];
-    }
-	if(sum != num_rows) {
-		chunk_size[comm_sz-1] += num_rows-sum;
-		sum += num_rows-sum;
-	}
-    if(sum != num_rows) {
-        cout << "Size mismatch" << endl;
-        exit(1);
-    }
-	
-    //Allocates memory for the conduction variables based on the previously read in simulation
-    //parameters
+    //Allocates memory for cell dimensions and distances
     dim_x = new REAL[num_cols];
     dim_y = new REAL[num_rows];
     dim_z = new REAL[num_slices];
     dist_x = new REAL[num_cols];
     dist_y = new REAL[num_rows];
     dist_z = new REAL[num_slices];
-    temp = new REAL**[chunk_size[my_rank]+2];
-    next_temp = new REAL**[chunk_size[my_rank]+2];
-    cond_codes = new int**[chunk_size[my_rank]+2];
-    cond_hp_index = new int**[chunk_size[my_rank]+2];
-    cond_tc_index = new int**[chunk_size[my_rank]+2];
-    use_cond = new int**[chunk_size[my_rank]+2];
-    for(int i = 0; i < chunk_size[my_rank]+2; i++) {
-        temp[i] = new REAL*[num_cols];
-        next_temp[i] = new REAL*[num_cols];
-        cond_codes[i] = new int*[num_cols];
-        cond_hp_index[i] = new int*[num_cols];
-        cond_tc_index[i] = new int*[num_cols];
-        use_cond[i] = new int*[num_cols];
-        for (int j = 0; j < num_cols; j++) {
-            temp[i][j] = new REAL[num_slices];
-            next_temp[i][j] = new REAL[num_slices];
-            cond_codes[i][j] = new int[num_slices];
-            cond_hp_index[i][j] = new int[num_slices];
-            cond_tc_index[i][j] = new int[num_slices];
-            use_cond[i][j] = new int[num_slices];
-        }
-    }
     
-	REAL tmp_real;
-    //Reads in the starting temperatures of the simulation from the input file
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-				source_file >> tmp_real;
-				if(my_rank == 0) {
-					if(i >= 0 && i <= chunk_size[my_rank]) {
-						temp[i][j][k] = tmp_real;
-					}
-				}
-				else if(my_rank == comm_sz-1) {
-					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
-					}
-				}
-				else {
-					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
-					}
-				}
-            }
-        }
-    }
-	if(my_rank == 0) {
-		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
-	}
-	
-	
-    //Reads in the conduction codes for each cell of the simulation and parses
-    //the array indexs from the codes
-    //Unlike, the Fortran version of the program, the conduction direction codes
-    //are ignored since the simulation accounts for them internally
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-                source_file >> temp_str;
-				if(my_rank == 0) {
-					if(i >= 0 && i <= chunk_size[my_rank]) {
-						cond_codes[i][j][k] = atoi(temp_str.c_str());
-						cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-						cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                        use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
-					}
-				}
-				else if(my_rank == comm_sz-1) {
-					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-						cond_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
-						cond_tc_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-						cond_hp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                        use_cond[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
-					}
-				}
-				else {
-					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-						cond_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
-						cond_tc_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-						cond_hp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-						use_cond[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
-					}
-				}
-            }
-        }
-    }
-	if(my_rank == 0) {
-		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
-	}
-    
-    //If convection is used for the user specified input file, memory is allocated for its
-    //variables and they are read in from the input file
-    if(using_convection) {     
-        //Allocates memory for the convection variables based on the previously read in simulation
-        //parameters
-        conv_codes = new int**[chunk_size[my_rank]+2];
-        conv_min_temp_index = new int**[chunk_size[my_rank]+2];
-        conv_direction = new int**[chunk_size[my_rank]+2];
-        conv_vel_index = new int**[chunk_size[my_rank]+2];
-        conv_fluid_index = new int**[chunk_size[my_rank]+2];
-        conv_rock_index = new int**[chunk_size[my_rank]+2];
-        for(int i = 0; i < chunk_size[my_rank]+2; i++) {
-            conv_codes[i] = new int*[num_cols];
-            conv_min_temp_index[i] = new int*[num_cols];
-            conv_direction[i] = new int*[num_cols];
-            conv_vel_index[i] = new int*[num_cols];
-            conv_fluid_index[i] = new int*[num_cols];
-            conv_rock_index[i] = new int*[num_cols];
-            for (int j = 0; j < num_cols; j++) {
-                conv_codes[i][j] = new int[num_slices];
-                conv_min_temp_index[i][j] = new int[num_slices];
-                conv_direction[i][j] = new int[num_slices];
-                conv_vel_index[i][j] = new int[num_slices];
-                conv_fluid_index[i][j] = new int[num_slices];
-                conv_rock_index[i][j] = new int[num_slices];
-            }
-        }
-        
-        //Reads in the convection codes for each cell of the simulation and parses the array
-        //indexs from the ocdes
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    source_file >> temp_str;
-					if(my_rank == 0) {
-						if(i >= 0 && i <= chunk_size[my_rank]) {
-							conv_codes[i][j][k] = atoi(temp_str.c_str());
-							conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
-						}
-					}
-					else if(my_rank == comm_sz-1) {
-						if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-							conv_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
-							conv_min_temp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_vel_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_fluid_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_rock_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_direction[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
-						}
-					}
-					else {
-						if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
-							conv_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
-							conv_min_temp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_vel_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_fluid_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_rock_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-							conv_direction[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
-						}
-					}
-                }
-            }
-        }
-		if(my_rank == 0) {
-			cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
-		}
-    }
     //Reads in the Y (column) dimensions and finds the minimum column distance
     for(int i = 0; i < num_cols; i++) {
         source_file >> dim_x[i];
@@ -1391,6 +1213,22 @@ void load_file() {
 		}
     }
 
+    //Calculates the maximum time step of the simulation
+    min_dim = min_row_dim;
+    if(min_col_dim < min_dim) {
+        min_dim = min_col_dim;
+    }
+    if(num_slices > 1 && min_slice_dim < min_dim) {
+        min_dim = min_slice_dim;
+    }
+    time_step = min_dim*min_dim/(5*max_thermal_conduct_diff);
+    if(my_rank == 0) {
+        if(temp_time_step < time_step) {
+            time_step = temp_time_step;
+        }
+    }
+    MPI_Bcast(&time_step,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
+    
     //Reads in the convection specific variables if convection
     //is used by the user specified input file
     if(using_convection) {
@@ -1441,32 +1279,276 @@ void load_file() {
 		if(my_rank == 0) {
 			cout << endl;
 		}
+        
+        /*
+        T1 = max_thermal_conduct_diff;
+        T2 = min_col_dim;
+        T3 = min_row_dim;
+        */
+        //Finds the convection time increment
+        tic = min_dim/max_vel;
+        
+        //Calculates the number of convection loops to perform per time step
+        num_conv_loops = (int)(time_step/(10*tic));
+        if(num_conv_loops > 5) {
+            num_conv_loops = 5;
+        }
+        else if(num_conv_loops <= 0) {
+            num_conv_loops = 1;
+        }
+    }
+    
+    //Calculates the chunk size and row displacements
+	double count = 0.0; 
+    double prev_count;
+    chunk_size = new int[comm_sz];
+	displacements = new int[comm_sz];
+	int sum = 0;
+    for(int i = 0; i < comm_sz; i++) {
+		displacements[i] = (int)count;
+        prev_count = count;
+        count += (double)num_rows / (double)comm_sz;
+        chunk_size[i] = (int)count - (int)prev_count;
+		sum += chunk_size[i];
+    }
+	if(sum != num_rows) {
+		chunk_size[comm_sz-1] += num_rows-sum;
+		sum += num_rows-sum;
+	}
+    if(sum != num_rows) {
+        cout << "Size mismatch" << endl;
+        exit(1);
+    }
+	
+    //Allocates memory for the conduction variables based on the previously read in simulation
+    //parameters
+    
+    temp = new REAL**[chunk_size[my_rank]+2];
+    next_temp = new REAL**[chunk_size[my_rank]+2];
+    cond_codes = new int**[chunk_size[my_rank]+2];
+    cond_hp_index = new int**[chunk_size[my_rank]+2];
+    cond_tc_index = new int**[chunk_size[my_rank]+2];
+    use_cond = new int**[chunk_size[my_rank]+2];
+    for(int i = 0; i < chunk_size[my_rank]+2; i++) {
+        temp[i] = new REAL*[num_cols];
+        next_temp[i] = new REAL*[num_cols];
+        cond_codes[i] = new int*[num_cols];
+        cond_hp_index[i] = new int*[num_cols];
+        cond_tc_index[i] = new int*[num_cols];
+        use_cond[i] = new int*[num_cols];
+        for (int j = 0; j < num_cols; j++) {
+            temp[i][j] = new REAL[num_slices];
+            next_temp[i][j] = new REAL[num_slices];
+            cond_codes[i][j] = new int[num_slices];
+            cond_hp_index[i][j] = new int[num_slices];
+            cond_tc_index[i][j] = new int[num_slices];
+            use_cond[i][j] = new int[num_slices];
+        }
+    }
+    
+	
+    //Reads in the starting temperatures of the simulation from the input file
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+				source_file >> tmp_real;
+				if(my_rank == 0) {
+					if(i >= 0 && i <= chunk_size[my_rank]) {
+						temp[i][j][k] = tmp_real;
+					}
+				}
+				else if(my_rank == comm_sz-1) {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
+					}
+				}
+				else {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						temp[i-displacements[my_rank]+1][j][k] = tmp_real;
+					}
+				}
+            }
+        }
+    }
+	if(my_rank == 0) {
+		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
+	}
+	
+	
+    //Reads in the conduction codes for each cell of the simulation and parses
+    //the array indexs from the codes
+    //Unlike, the Fortran version of the program, the conduction direction codes
+    //are ignored since the simulation accounts for them internally
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                source_file >> temp_str;
+                if(temp_str.size() != 2*INDEX_WIDTH+1) {
+                    if(my_rank == 0) {
+                        cerr << "Incorrect Conduction code found at: " << i << "," << j << "," << k << endl;
+                        cerr << "Code has character length of " << temp_str.size() << " instead of " << 2*INDEX_WIDTH+1 << endl;
+                    }
+                    exit(1);
+                }
+				if(my_rank == 0) {
+					if(i >= 0 && i <= chunk_size[my_rank]) {
+						cond_codes[i][j][k] = atoi(temp_str.c_str());
+						cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                        if(cond_tc_index[i][j][k] < 0 || cond_tc_index[i][j][k] >= num_tcd) {
+                            cerr << "Incorrect Thermal Conductivity Diff. Index found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+						cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                        if(cond_hp_index[i][j][k] < 0 || cond_hp_index[i][j][k] >= num_hp) {
+                            cerr << "Incorrect Heat Production Value Index found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+                        use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+                        if(use_cond[i][j][k] < 0 || use_cond[i][j][k] > 1) {
+                            cerr << "Incorrect Conduction Enable flag found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+					}
+				}
+				else {
+					if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+						cond_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+						cond_tc_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						if(cond_tc_index[i-displacements[my_rank]+1][j][k] < 0 || cond_tc_index[i-displacements[my_rank]+1][j][k] >= num_tcd) {
+                            cerr << "Incorrect Thermal Conductivity Diff. Index found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+                        cond_hp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+						if(cond_hp_index[i-displacements[my_rank]+1][j][k] < 0 || cond_hp_index[i-displacements[my_rank]+1][j][k] >= num_hp) {
+                            cerr << "Incorrect Heat Production Value Index found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+                        use_cond[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+                        if(use_cond[i-displacements[my_rank]+1][j][k] < 0 || use_cond[i-displacements[my_rank]+1][j][k] > 1) {
+                            cerr << "Incorrect Conduction Enable flag found at: " << i << "," << j << "," << k << endl;
+                            exit(1);
+                        }
+					}
+				}
+            }
+        }
+    }
+	if(my_rank == 0) {
+		cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
+	}
+    
+    //If convection is used for the user specified input file, memory is allocated for its
+    //variables and they are read in from the input file
+    if(using_convection) {     
+        //Allocates memory for the convection variables based on the previously read in simulation
+        //parameters
+        conv_codes = new int**[chunk_size[my_rank]+2];
+        conv_min_temp_index = new int**[chunk_size[my_rank]+2];
+        conv_direction = new int**[chunk_size[my_rank]+2];
+        conv_vel_index = new int**[chunk_size[my_rank]+2];
+        conv_fluid_index = new int**[chunk_size[my_rank]+2];
+        conv_rock_index = new int**[chunk_size[my_rank]+2];
+        for(int i = 0; i < chunk_size[my_rank]+2; i++) {
+            conv_codes[i] = new int*[num_cols];
+            conv_min_temp_index[i] = new int*[num_cols];
+            conv_direction[i] = new int*[num_cols];
+            conv_vel_index[i] = new int*[num_cols];
+            conv_fluid_index[i] = new int*[num_cols];
+            conv_rock_index[i] = new int*[num_cols];
+            for (int j = 0; j < num_cols; j++) {
+                conv_codes[i][j] = new int[num_slices];
+                conv_min_temp_index[i][j] = new int[num_slices];
+                conv_direction[i][j] = new int[num_slices];
+                conv_vel_index[i][j] = new int[num_slices];
+                conv_fluid_index[i][j] = new int[num_slices];
+                conv_rock_index[i][j] = new int[num_slices];
+            }
+        }
+        
+        //Reads in the convection codes for each cell of the simulation and parses the array
+        //indexs from the ocdes
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 0; i < num_rows; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    source_file >> temp_str;
+                    if(temp_str.size() != 5*INDEX_WIDTH) {
+                        if(my_rank == 0) {
+                            cerr << "Incorrect Convection code found at: " << i << "," << j << "," << k << endl;
+                            cerr << "Code has character length of " << temp_str.size() << " instead of " << 5*INDEX_WIDTH << endl;
+                        }
+                        exit(1);
+                    }
+					if(my_rank == 0) {
+						if(i >= 0 && i <= chunk_size[my_rank]) {
+							conv_codes[i][j][k] = atoi(temp_str.c_str());
+							conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_min_temp_index[i][j][k] < 0 || conv_min_temp_index[i][j][k] >= num_mtc) {
+                                cerr << "Incorrect Minimum Convection Temp Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_vel_index[i][j][k] < 0 || conv_vel_index[i][j][k] > num_vel) {
+                                cerr << "Incorrect Convection Velocity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_fluid_index[i][j][k] < 0 || conv_fluid_index[i][j][k] > num_hcf) {
+                                cerr << "Incorrect Fluid Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_rock_index[i][j][k] < 0 || conv_rock_index[i][j][k] > num_vel) {
+                                cerr << "Incorrect Rock Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+                            if(conv_direction[i][j][k] < 1 || conv_vel_index[i][j][k] > 27) {
+                                cerr << "Incorrect Convection Direction found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                        }
+					}
+					else {
+						if(i >= displacements[my_rank]-1 && i <= displacements[my_rank] + chunk_size[my_rank]) {
+							conv_codes[i-displacements[my_rank]+1][j][k] = atoi(temp_str.c_str());
+							conv_min_temp_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_min_temp_index[i-displacements[my_rank]+1][j][k] < 0 || conv_min_temp_index[i-displacements[my_rank]+1][j][k] >= num_mtc) {
+                                cerr << "Incorrect Minimum Convection Temp Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_vel_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_vel_index[i-displacements[my_rank]+1][j][k] < 0 || conv_vel_index[i-displacements[my_rank]+1][j][k] > num_vel) {
+                                cerr << "Incorrect Convection Velocity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_fluid_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_fluid_index[i-displacements[my_rank]+1][j][k] < 0 || conv_fluid_index[i-displacements[my_rank]+1][j][k] > num_hcf) {
+                                cerr << "Incorrect Fluid Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_rock_index[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+							if(conv_rock_index[i-displacements[my_rank]+1][j][k] < 0 || conv_rock_index[i-displacements[my_rank]+1][j][k] > num_vel) {
+                                cerr << "Incorrect Rock Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                            conv_direction[i-displacements[my_rank]+1][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+                            if(conv_direction[i-displacements[my_rank]+1][j][k] < 1 || conv_direction[i-displacements[my_rank]+1][j][k] > 27) {
+                                cerr << "Incorrect Convection Direction found at: " << i << "," << j << "," << k << endl;
+                                exit(1);
+                            }
+                        }
+					}
+                }
+            }
+        }
+		if(my_rank == 0) {
+			cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
+		}
     }
     
     //Closes the input file
     source_file.close();
-	
-    /*
-    T1 = max_thermal_conduct_diff;
-    T2 = min_col_dim;
-    T3 = min_row_dim;
-    */
-    //Finds the convection time increment
-    if(using_convection) {
-        if(min_col_dim > min_row_dim) {
-            tic = min_row_dim/max_vel;
-        }
-        else {
-            tic = min_col_dim/max_vel;
-        }
-    }
-    //Calculates the maximum time step of the simulation
-    if(min_col_dim < min_row_dim) {
-        time_step = min_col_dim*min_col_dim/(5*max_thermal_conduct_diff);
-    }
-    else {
-        time_step = min_row_dim*min_row_dim/(5*max_thermal_conduct_diff);
-    }
+
 	if(my_rank == 0) {
 		cout << endl << "Done Loading Input File" << endl;
 	}
@@ -1495,68 +1577,6 @@ void save_model_state() {
             output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
             output_file << title << endl;
             
-            output_file << setprecision(OUT_PRECISION);
-            //Prints the current temperature array of the simulation
-            for (int k = 0; k < num_slices; k++) {
-                for(int i = 0; i < chunk_size[my_rank]; i++) {
-                    for(int j = 0; j < num_cols; j++) {
-                        tmp_array1[i*num_cols + j] = temp[i][j][k];
-                    }
-                }
-                for(int i = 1; i < comm_sz; i++) {
-                    MPI_Recv(&tmp_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_REAL_VALUE,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-                }
-                
-                for(int i = 0; i < num_rows; i++) {
-                    for(int j = 0; j < num_cols; j++) {
-                        output_file << " " << setw(OUT_PRECISION+5) << tmp_array1[i*num_cols + j];
-                    }
-                    output_file << endl;
-                }
-                output_file << endl;
-            }
-            
-            //Prints the conduction codes of the simulation to the output file
-            output_file << setfill('0');
-            for (int k = 0; k < num_slices; k++) {
-                for(int i = 0; i < chunk_size[my_rank]; i++) {
-                    for(int j = 0; j < num_cols; j++) {
-                        code_array1[i*num_cols + j] = cond_codes[i][j][k];
-                    }
-                }
-                for(int i = 1; i < comm_sz; i++) {
-                    MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-                }
-                
-                for(int i = 0; i < num_rows; i++) {
-                    for(int j = 0; j < num_cols; j++) {
-                        output_file << " " << setw(2*INDEX_WIDTH+1) << code_array1[i*num_cols + j];
-                    }
-                    output_file << endl;
-                }
-                output_file << endl;
-            }
-            
-            //Prints the convection codes to the output file if convection is being used
-            if(using_convection) {
-                for (int k = 0; k < num_slices; k++) {
-                    for(int i = 0; i < chunk_size[my_rank]; i++) {
-                        for(int j = 0; j < num_cols; j++) {
-                            code_array1[i*num_cols + j] = conv_codes[i][j][k];
-                        }
-                    }
-                    for(int i = 1; i < comm_sz; i++) {
-                        MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-                    }
-                    for(int i = 0; i < num_rows; i++) {
-                        for(int j = 0; j < num_cols; j++) {
-                            output_file << " " << setw(4*INDEX_WIDTH+2) << code_array1[i*num_cols + j];
-                        }
-                        output_file << endl;
-                    }
-                    output_file << endl;
-                }
-            }
             
             output_file << setfill(' ');
             output_file << setprecision(3);
@@ -1622,6 +1642,70 @@ void save_model_state() {
                     output_file << " " << vel[i];
                 }
                 output_file << endl;
+            }
+            
+            output_file << setprecision(OUT_PRECISION) << fixed;
+            output_file << endl;
+            //Prints the current temperature array of the simulation
+            for (int k = 0; k < num_slices; k++) {
+                for(int i = 0; i < chunk_size[my_rank]; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        tmp_array1[i*num_cols + j] = temp[i][j][k];
+                    }
+                }
+                for(int i = 1; i < comm_sz; i++) {
+                    MPI_Recv(&tmp_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_REAL_VALUE,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                }
+                
+                for(int i = 0; i < num_rows; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        output_file << " " << setw(OUT_PRECISION+5) << tmp_array1[i*num_cols + j];
+                    }
+                    output_file << endl;
+                }
+                output_file << endl;
+            }
+            
+            //Prints the conduction codes of the simulation to the output file
+            output_file << setfill('0');
+            for (int k = 0; k < num_slices; k++) {
+                for(int i = 0; i < chunk_size[my_rank]; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        code_array1[i*num_cols + j] = cond_codes[i][j][k];
+                    }
+                }
+                for(int i = 1; i < comm_sz; i++) {
+                    MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                }
+                
+                for(int i = 0; i < num_rows; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        output_file << " " << setw(2*INDEX_WIDTH+1) << code_array1[i*num_cols + j];
+                    }
+                    output_file << endl;
+                }
+                output_file << endl;
+            }
+            
+            //Prints the convection codes to the output file if convection is being used
+            if(using_convection) {
+                for (int k = 0; k < num_slices; k++) {
+                    for(int i = 0; i < chunk_size[my_rank]; i++) {
+                        for(int j = 0; j < num_cols; j++) {
+                            code_array1[i*num_cols + j] = conv_codes[i][j][k];
+                        }
+                    }
+                    for(int i = 1; i < comm_sz; i++) {
+                        MPI_Recv(&code_array1[displacements[i]*num_cols],num_cols*chunk_size[i],MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+                    }
+                    for(int i = 0; i < num_rows; i++) {
+                        for(int j = 0; j < num_cols; j++) {
+                            output_file << " " << setw(4*INDEX_WIDTH+2) << code_array1[i*num_cols + j];
+                        }
+                        output_file << endl;
+                    }
+                    output_file << endl;
+                }
             }
             
             //Closes the output file
@@ -2261,7 +2345,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--save_result") == 0) {
             save_result = 1;
         } else if (strcmp(argv[i], "--time_step") == 0) {
-            temp_val = atof(argv[++i]);
+            temp_time_step = atof(argv[++i]);
         } else if (strcmp(argv[i], "--run_time") == 0) {
             run_time = atof(argv[++i]);
         } else if (strcmp(argv[i], "--num_loops") == 0) {
@@ -2288,7 +2372,7 @@ int main(int argc, char **argv) {
         exit(0);
     }
     
-    if(temp_val <= 0) {
+    if(temp_time_step <= 0) {
         cerr << "Time step not specified" << endl;
         exit(0);
     }
@@ -2466,30 +2550,17 @@ int main(int argc, char **argv) {
     //Allows the user to decrease the size of the time step
 	if(my_rank == 0) {
 		cout << endl << endl << "Each Iteration in Time Spans " << scientific << time_step << " Years" << endl;
-		cout << "Enter a Shorter Iteration Time in Years if Desired (any larger number otherwise): " << temp_val << endl;
+		cout << "Enter a Shorter Iteration Time in Years if Desired (any larger number otherwise): " << temp_time_step << endl;
 		/*while(!(cin >> temp_val) || temp_val <= 0) {
 			clear_cin();
 			cout << "Incorrect input, enter a number greater than 0: ";
-		}*/
+		}
 		if(temp_val < time_step) {
 			time_step = temp_val;
-		}
-		MPI_Bcast(&time_step,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
-	}
-	else {
-		MPI_Bcast(&time_step,1,MPI_REAL_VALUE,0,MPI_COMM_WORLD);
-	}
+		}*/
+    }
     
     DHF = chf * QFAC * time_step;
-
-    //Calculates the number of convection loops to perform per time step
-    num_conv_loops = (int)(time_step/(10*tic));
-    if(num_conv_loops > 5) {
-        num_conv_loops = 5;
-    }
-    else if(num_conv_loops <= 0) {
-        num_conv_loops = 1;
-    }
 
     //Calculates the time increment per convection loop
     time_inc = time_step/num_conv_loops;

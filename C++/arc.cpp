@@ -10,15 +10,6 @@
 #endif
 
 #ifdef DISPLAY
-#ifdef __APPLE__
-#	include <OpenGL/gl.h>
-#	include <OpenGL/glu.h>
-#	include <GLUT/glut.h>
-#else
-#	include <GL/GL.h>
-#	include <GL/GLU.h>
-#	include <GL/glut.h>
-#endif
 #	include "GL/freeglut.h"
 #endif
 
@@ -47,6 +38,7 @@ using std::endl;
 using std::string;
 using std::ofstream;
 using std::ifstream;
+using std::stringstream;
 using std::ostringstream;
 using std::setw;
 using std::right;
@@ -167,7 +159,7 @@ REAL max_thermal_conduct_diff;  //The maximum thermal conductivity difference
 REAL min_thermal_conduct_diff;  //The minimum thermal conductivity difference
 int num_loops = -1;             //The number of loops between screen updates
 int su_num_width;               //The number of characters for the slice number in the output surfer filenames
-unsigned long long count = 0;	//The current loop
+unsigned long long count = 0;    //The current loop
 REAL tolerance = -1;            //The maximum difference required for the model to stop
 REAL max_temp_diff;             //The maximum temperature difference between the current and next temperature arrays
 
@@ -283,18 +275,18 @@ const float inertia         = 0.1f;
  * Sets max and min temperature values for simulation
  */
 void array_minmax() {
-	min_temp=temp[0][0][0];
-	max_temp=temp[0][0][0];
+    min_temp=temp[0][0][0];
+    max_temp=temp[0][0][0];
     for(int k=0; k<num_slices; k++) {
-		for (int i=0; i<num_rows; i++) {
-			for(int j=0; j<num_cols; j++) {
-				if(temp[i][j][k]<min_temp)
-					min_temp = temp[i][j][k];
-				if(temp[i][j][k]>max_temp)
-					max_temp = temp[i][j][k];
-			}
-		}
-	}
+        for (int i=0; i<num_rows; i++) {
+            for(int j=0; j<num_cols; j++) {
+                if(temp[i][j][k]<min_temp)
+                    min_temp = temp[i][j][k];
+                if(temp[i][j][k]>max_temp)
+                    max_temp = temp[i][j][k];
+            }
+        }
+    }
 }
 
 void array_max() {
@@ -313,7 +305,7 @@ void array_max() {
  * 3D to 1D indexing
  */
 static int POSITION(int x, int y) {
-	return (x*num_cols)+y;
+    return (x*num_cols)+y;
 }
 
 
@@ -322,34 +314,34 @@ static int POSITION(int x, int y) {
  * Concept based on: http://paulbourke.net/texture_colour/colourspace/ (11/21/12)
  */
 void jet_color_set(int x, int y, int z) {
-	REAL current_temp = temp[x][y][z];
-	REAL delta_temp = max_temp - min_temp;
-	
-	if(current_temp < min_temp)
-		current_temp = min_temp;
-	if(current_temp > max_temp)
-		current_temp = max_temp;
+    REAL current_temp = temp[x][y][z];
+    REAL delta_temp = max_temp - min_temp;
+    
+    if(current_temp < min_temp)
+        current_temp = min_temp;
+    if(current_temp > max_temp)
+        current_temp = max_temp;
 
-	if(current_temp < (min_temp + 0.25 * delta_temp)) {
-		color_field[POSITION(x,y) * 3] = (GLfloat)0.0;	
-		color_field[POSITION(x,y) * 3 + 1] = (GLfloat)(4*(current_temp - min_temp)/delta_temp);
-		color_field[POSITION(x,y) * 3 + 2] = (GLfloat)1.0;
-	}
-	else if(current_temp < (min_temp + 0.5 * delta_temp)) {
-		color_field[POSITION(x,y) * 3] = (GLfloat)0.0;	
-		color_field[POSITION(x,y) * 3 + 1] = (GLfloat)1.0;	
-		color_field[POSITION(x,y) * 3 + 2] = (GLfloat)(1.0 + 4 * (min_temp + 0.25 * delta_temp - current_temp) / delta_temp);
-	}
-	else if(current_temp < (min_temp + 0.75 * delta_temp)) {
-		color_field[POSITION(x,y) * 3] = (GLfloat)(4 * (current_temp - min_temp - 0.5 * delta_temp) / delta_temp);	
-		color_field[POSITION(x,y) * 3 + 1] = (GLfloat)1.0;
-		color_field[POSITION(x,y) * 3 + 2] = (GLfloat)0.0;
-	}
-	else {
-		color_field[POSITION(x,y) * 3] = (GLfloat)1.0;	
-		color_field[POSITION(x,y) * 3 + 1] = (GLfloat)(1.0 + 4 * (min_temp + 0.75 * delta_temp - current_temp) / delta_temp);
-		color_field[POSITION(x,y) * 3 + 2] = (GLfloat)0.0;
-	}
+    if(current_temp < (min_temp + 0.25 * delta_temp)) {
+        color_field[POSITION(x,y) * 3] = (GLfloat)0.0;    
+        color_field[POSITION(x,y) * 3 + 1] = (GLfloat)(4*(current_temp - min_temp)/delta_temp);
+        color_field[POSITION(x,y) * 3 + 2] = (GLfloat)1.0;
+    }
+    else if(current_temp < (min_temp + 0.5 * delta_temp)) {
+        color_field[POSITION(x,y) * 3] = (GLfloat)0.0;    
+        color_field[POSITION(x,y) * 3 + 1] = (GLfloat)1.0;    
+        color_field[POSITION(x,y) * 3 + 2] = (GLfloat)(1.0 + 4 * (min_temp + 0.25 * delta_temp - current_temp) / delta_temp);
+    }
+    else if(current_temp < (min_temp + 0.75 * delta_temp)) {
+        color_field[POSITION(x,y) * 3] = (GLfloat)(4 * (current_temp - min_temp - 0.5 * delta_temp) / delta_temp);    
+        color_field[POSITION(x,y) * 3 + 1] = (GLfloat)1.0;
+        color_field[POSITION(x,y) * 3 + 2] = (GLfloat)0.0;
+    }
+    else {
+        color_field[POSITION(x,y) * 3] = (GLfloat)1.0;    
+        color_field[POSITION(x,y) * 3 + 1] = (GLfloat)(1.0 + 4 * (min_temp + 0.75 * delta_temp - current_temp) / delta_temp);
+        color_field[POSITION(x,y) * 3 + 2] = (GLfloat)0.0;
+    }
 }
 
 
@@ -358,124 +350,124 @@ void jet_color_set(int x, int y, int z) {
  * Originally drew cubes from Robert Bergmans voxel display code.
  */
 void draw_cube(int x, int y, int z) {
-	if(z == current_slice) {
-		transparency = 1.0f;
-	}
-	else {
-		transparency = 0.3f;
-	}
-	glBegin(GL_TRIANGLES);
-		//front
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-		
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(1.0f,-1.0f,1.0f);//7
+    if(z == current_slice) {
+        transparency = 1.0f;
+    }
+    else {
+        transparency = 0.3f;
+    }
+    glBegin(GL_TRIANGLES);
+        //front
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,1.0f);//5
+        glVertex3f(1.0f,0.0f,1.0f);//6
+        glVertex3f(0.0f,-1.0f,1.0f);//8
+        
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,-1.0f,1.0f);//8
+        glVertex3f(1.0f,0.0f,1.0f);//6
+        glVertex3f(1.0f,-1.0f,1.0f);//7
 
-		//top
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,0.0f,1.0f);//6
-	
-	
-	//QUADS code left in case we need it later	
-	/*
-	glBegin(GL_QUADS);
-		//front
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(0.0f,-1.0f,1.0f);//8
+        //top
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,0.0f);//1
+        glVertex3f(1.0f,0.0f,0.0f);//2
+        glVertex3f(0.0f,0.0f,1.0f);//5
+        
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,1.0f);//5
+        glVertex3f(1.0f,0.0f,0.0f);//2
+        glVertex3f(1.0f,0.0f,1.0f);//6
+    
+    
+    //QUADS code left in case we need it later    
+    /*
+    glBegin(GL_QUADS);
+        //front
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,1.0f);//5
+        glVertex3f(1.0f,0.0f,1.0f);//6
+        glVertex3f(1.0f,-1.0f,1.0f);//7
+        glVertex3f(0.0f,-1.0f,1.0f);//8
 
-		//top
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(0.0f,0.0f,1.0f);//5
+        //top
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,0.0f);//1
+        glVertex3f(1.0f,0.0f,0.0f);//2
+        glVertex3f(1.0f,0.0f,1.0f);//6
+        glVertex3f(0.0f,0.0f,1.0f);//5
 
-		*//*//left
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(0.0f,0.0f,1.0f);//5
-		glVertex3f(0.0f,-1.0f,1.0f);//8
-		glVertex3f(0.0f,-1.0f,0.0f);//4
+        *//*//left
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,0.0f);//1
+        glVertex3f(0.0f,0.0f,1.0f);//5
+        glVertex3f(0.0f,-1.0f,1.0f);//8
+        glVertex3f(0.0f,-1.0f,0.0f);//4
 
-		//right
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,0.0f,1.0f);//6
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(1.0f,-1.0f,0.0f);//3
+        //right
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(1.0f,0.0f,0.0f);//2
+        glVertex3f(1.0f,0.0f,1.0f);//6
+        glVertex3f(1.0f,-1.0f,1.0f);//7
+        glVertex3f(1.0f,-1.0f,0.0f);//3
 
-		//bottom
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,-1.0f,0.0f);//4
-		glVertex3f(1.0f,-1.0f,0.0f);//3
-		glVertex3f(1.0f,-1.0f,1.0f);//7
-		glVertex3f(0.0f,-1.0f,1.0f);//8
+        //bottom
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,-1.0f,0.0f);//4
+        glVertex3f(1.0f,-1.0f,0.0f);//3
+        glVertex3f(1.0f,-1.0f,1.0f);//7
+        glVertex3f(0.0f,-1.0f,1.0f);//8
 
-		//back
-		glColor4f(	color_field[POSITION(x,y) * 3],
-					color_field[POSITION(x,y) * 3 + 1],
-					color_field[POSITION(x,y) * 3 + 2],
-					transparency);
-		glVertex3f(0.0f,0.0f,0.0f);//1
-		glVertex3f(1.0f,0.0f,0.0f);//2
-		glVertex3f(1.0f,-1.0f,0.0f);//3
-		glVertex3f(0.0f,-1.0f,0.0f);//4
-		*/
+        //back
+        glColor4f(    color_field[POSITION(x,y) * 3],
+                    color_field[POSITION(x,y) * 3 + 1],
+                    color_field[POSITION(x,y) * 3 + 2],
+                    transparency);
+        glVertex3f(0.0f,0.0f,0.0f);//1
+        glVertex3f(1.0f,0.0f,0.0f);//2
+        glVertex3f(1.0f,-1.0f,0.0f);//3
+        glVertex3f(0.0f,-1.0f,0.0f);//4
+        */
 
-	glEnd();
+    glEnd();
 }
 
 
 /*
  *Draw all HUD/Overlay graphics. Quads for temp scale are hardcoded to Jet color map. Any new color map will require changes.
  */
-void displayOverlay(){	
-	int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
-	int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
+void displayOverlay(){    
+    int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
+    int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
     
-	glMatrixMode( GL_PROJECTION );
+    glMatrixMode( GL_PROJECTION );
     glPushMatrix();
         glLoadIdentity();
         glOrtho(0.0f,windowWidth,windowHeight,0.0f,0.0f,1.0f);
@@ -483,33 +475,33 @@ void displayOverlay(){
         glMatrixMode( GL_MODELVIEW );
         glPushMatrix();
             glLoadIdentity();
-			glBegin( GL_QUADS );
+            glBegin( GL_QUADS );
 
-				glColor3f( 0.0f, 0.0f, 1.0f );
+                glColor3f( 0.0f, 0.0f, 1.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-75), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-45), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-45), 50.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-75), 50.0f );
 
-				glColor3f( 0.0f, 1.0f, 1.0f );
+                glColor3f( 0.0f, 1.0f, 1.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-45), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-15), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-15), 50.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-45), 50.0f );
 
-				glColor3f( 0.0f, 1.0f, 0.0f );
+                glColor3f( 0.0f, 1.0f, 0.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-15), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+15), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+15), 50.0f );
                 glVertex2f( (GLfloat)(windowWidth/2-15), 50.0f );
 
-				glColor3f( 1.0f, 1.0f, 0.0f );
+                glColor3f( 1.0f, 1.0f, 0.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+15), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+45), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+45), 50.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+15), 50.0f );
 
-				glColor3f( 1.0f, 0.0f, 0.0f );
+                glColor3f( 1.0f, 0.0f, 0.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+45), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+75), 20.0f );
                 glVertex2f( (GLfloat)(windowWidth/2+75), 50.0f );
@@ -517,82 +509,82 @@ void displayOverlay(){
 
             glEnd();
         glPopMatrix();
-		glPushMatrix();
-			glLoadIdentity();
-			ostringstream str1;
+        glPushMatrix();
+            glLoadIdentity();
+            ostringstream str1;
 
-			str1 << "Min Temp <                                          > Max Temp";
-			glColor3f(1.0f, 1.0f, 1.0f); 
-			glRasterPos2f((GLfloat)(windowWidth/2-150),35.0f);
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
-			str1.str("");
-			str1.clear();
-			
-			str1 << setw(4) << min_temp;
-			glRasterPos2f((GLfloat)(windowWidth/2-100), 65.0f);
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
-			str1.str("");
-			str1.clear();
+            str1 << "Min Temp <                                          > Max Temp";
+            glColor3f(1.0f, 1.0f, 1.0f); 
+            glRasterPos2f((GLfloat)(windowWidth/2-150),35.0f);
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+            str1.str("");
+            str1.clear();
+            
+            str1 << setw(4) << min_temp;
+            glRasterPos2f((GLfloat)(windowWidth/2-100), 65.0f);
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+            str1.str("");
+            str1.clear();
 
-			str1 << setw(4) << (max_temp+min_temp)/2;
-			glRasterPos2f((GLfloat)(windowWidth/2-20), 65.0f);
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
-			str1.str("");
-			str1.clear();
+            str1 << setw(4) << (max_temp+min_temp)/2;
+            glRasterPos2f((GLfloat)(windowWidth/2-20), 65.0f);
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+            str1.str("");
+            str1.clear();
 
 
-			str1 << setw(4) << max_temp;
-			glRasterPos2f((GLfloat)(windowWidth/2+60), 65.0f);
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
-			str1.str("");
-			str1.clear();
+            str1 << setw(4) << max_temp;
+            glRasterPos2f((GLfloat)(windowWidth/2+60), 65.0f);
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str1.str().c_str());
+            str1.str("");
+            str1.clear();
 
-		glPopMatrix();
+        glPopMatrix();
         glPushMatrix();
             glLoadIdentity();
             ostringstream str;
 
-			str << "Time Interval:" << endl;
-			if(using_convection) {
-				str << "Conv. Time Interval:" << endl;
-				str << "Num Conv. Loops:" << endl;
-			}
+            str << "Time Interval:" << endl;
+            if(using_convection) {
+                str << "Conv. Time Interval:" << endl;
+                str << "Num Conv. Loops:" << endl;
+            }
 
-			str << endl << "Loop Total:" << endl;
-			str << "Sim Time:" << endl;
-			str << "Cum. Sim Time:" << endl << endl;
-		
-			str << "Model Dimensions:" << endl;
-			str << "Current Slice:" << endl;
-			str << "CHF:" << endl;
-			
-			glColor3f(1.0f, 1.0f, 1.0f); 
-			glRasterPos2f(10.0f,(GLfloat)(windowHeight*3.0/4.0));
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
-		
+            str << endl << "Loop Total:" << endl;
+            str << "Sim Time:" << endl;
+            str << "Cum. Sim Time:" << endl << endl;
+        
+            str << "Model Dimensions:" << endl;
+            str << "Current Slice:" << endl;
+            str << "CHF:" << endl;
+            
+            glColor3f(1.0f, 1.0f, 1.0f); 
+            glRasterPos2f(10.0f,(GLfloat)(windowHeight*3.0/4.0));
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
+        
 
-			str.str("");
-			str.clear();
-		
-			str << setprecision(4) << scientific;
-			str << time_step << endl;
-			if(using_convection) {
-				str << time_inc << endl;
-				str << num_conv_loops << endl;
-			}
+            str.str("");
+            str.clear();
+        
+            str << setprecision(4) << scientific;
+            str << time_step << endl;
+            if(using_convection) {
+                str << time_inc << endl;
+                str << num_conv_loops << endl;
+            }
 
-			str << endl << count << endl;
-			str << sim_time << endl;
-			str << initial_time + sim_time << endl << endl;
-			
-			str << num_rows << " X " << num_cols << " X " << num_slices << endl;
-			str << current_slice+1 << endl;
-			str << chf << endl;
-			
-			glColor3f(1.0f, 1.0f, 1.0f); 
-			glRasterPos2f(150.0f,(GLfloat)(windowHeight*3.0/4.0));
-			glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
-		            
+            str << endl << count << endl;
+            str << sim_time << endl;
+            str << initial_time + sim_time << endl << endl;
+            
+            str << num_rows << " X " << num_cols << " X " << num_slices << endl;
+            str << current_slice+1 << endl;
+            str << chf << endl;
+            
+            glColor3f(1.0f, 1.0f, 1.0f); 
+            glRasterPos2f(150.0f,(GLfloat)(windowHeight*3.0/4.0));
+            glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char *)str.str().c_str());
+                    
         glPopMatrix();
 
     glMatrixMode( GL_PROJECTION );
@@ -604,14 +596,14 @@ void displayOverlay(){
  */
 void display_helper() {
     array_max();
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glEnable(GL_DEPTH_TEST);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
 
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 
-	//  Handle the camera angle. Maintained for debugging
-	/*
+    //  Handle the camera angle. Maintained for debugging
+    /*
     for (int c = 0; c < 3; ++c)
     {
         camera_trans_lag[c] += (camera_trans[c] - camera_trans_lag[c]) * inertia;
@@ -621,53 +613,53 @@ void display_helper() {
     glTranslatef(camera_trans_lag[0], camera_trans_lag[1], camera_trans_lag[2]);
     glRotatef(camera_rot_lag[0], 1.0, 0.0, 0.0);
     glRotatef(camera_rot_lag[1], 0.0, 1.0, 0.0);
-	*/
+    */
 
-	//Draw the boundary lines
-	glBegin(GL_LINES);
-		glColor3f(1.0, 1.0, 1.0);
+    //Draw the boundary lines
+    glBegin(GL_LINES);
+        glColor3f(1.0, 1.0, 1.0);
 
-		glVertex3f(0.0f,0.0f,0.0f);
-		glVertex3f((GLfloat)num_cols,0.0f,0.0f);
-		glVertex3f((GLfloat)num_cols,0.0f,0.0f);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
-		glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
-		glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
-		glVertex3f(0.0f,0.0f,0.0f);
+        glVertex3f(0.0f,0.0f,0.0f);
+        glVertex3f((GLfloat)num_cols,0.0f,0.0f);
+        glVertex3f((GLfloat)num_cols,0.0f,0.0f);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
+        glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
+        glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
+        glVertex3f(0.0f,0.0f,0.0f);
 
-		glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
-		glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
-		glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
-		glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
+        glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
+        glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
+        glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
+        glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
 
-		glVertex3f(0.0f,0.0f,0.0f);
-		glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,0.0f,0.0f);
-		glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
-		glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
-		glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
-		glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
-	glEnd();
-	
-	for(int i=0; i<num_rows; i++) {
-		for (int j=0; j<num_cols; j++) {
-			glPushMatrix();
-			glTranslatef((GLfloat)j,(GLfloat)-i,(GLfloat)current_slice);
-			jet_color_set(i,j,current_slice);
-			draw_cube(i,j,current_slice);
-			glPopMatrix();
-		}
-	}
+        glVertex3f(0.0f,0.0f,0.0f);
+        glVertex3f(0.0f,0.0f,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,0.0f,0.0f);
+        glVertex3f((GLfloat)num_cols,0.0f,(GLfloat)num_slices);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,0.0f);
+        glVertex3f((GLfloat)num_cols,(GLfloat)-num_rows,(GLfloat)num_slices);
+        glVertex3f(0.0f,(GLfloat)-num_rows,0.0f);
+        glVertex3f(0.0f,(GLfloat)-num_rows,(GLfloat)num_slices);
+    glEnd();
+    
+    for(int i=0; i<num_rows; i++) {
+        for (int j=0; j<num_cols; j++) {
+            glPushMatrix();
+            glTranslatef((GLfloat)j,(GLfloat)-i,(GLfloat)current_slice);
+            jet_color_set(i,j,current_slice);
+            draw_cube(i,j,current_slice);
+            glPopMatrix();
+        }
+    }
 
-	displayOverlay();
-	glutSwapBuffers();
-	glutPostRedisplay();
+    displayOverlay();
+    glutSwapBuffers();
+    glutPostRedisplay();
 }
 
 /*
@@ -675,33 +667,33 @@ void display_helper() {
  * Makes call to display helper function
  */
 void display3D() {
-	//Displays status information for the current loop
-	if(count%num_loops == 0) {
+    //Displays status information for the current loop
+    if(count%num_loops == 0) {
         if(use_tolerance == 0) {
-		    cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
+            cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << endl;
         }
         else {
             cout << setw(15) << count << setw(20) << fixed << setprecision(5) << sim_time << setw(20) << initial_time + sim_time << setw(20) << max_temp_diff << endl;
         }
 
-		//Saves the current state of the simulation if the save_state flag is set
-		if(save_state) {
-			save_model_state();
-		}
-		display_helper();
-	}
-	if(sim_time <= run_time) {
-		//Performs convection updates if the current simulation is using convection
-		if(using_convection) {
-			convection();
-		}
+        //Saves the current state of the simulation if the save_state flag is set
+        if(save_state) {
+            save_model_state();
+        }
+        display_helper();
+    }
+    if(sim_time <= run_time) {
+        //Performs convection updates if the current simulation is using convection
+        if(using_convection) {
+            convection();
+        }
 
-		//Performs conduction calculations
-		conduction();
+        //Performs conduction calculations
+        conduction();
 
-		//Increments the simulation time and loop count
-		sim_time += time_step;
-		count++;
+        //Increments the simulation time and loop count
+        sim_time += time_step;
+        count++;
         
         if(use_tolerance == 1) {
             max_temp_diff = find_max_temp_diff();
@@ -722,22 +714,22 @@ void display3D() {
 
         //Updates the moving source
         if(using_moving_source == 1) {
-		    update_moving_sources();
+            update_moving_sources();
         }
-	}
-	else {
-		//Saves the final result of the simulation
-		if(save_state == 1 || save_result == 1) {
-			save_model_state();
-		}
-		save_surfer();
-		cout << endl << "Simulation Complete" << endl;
+    }
+    else {
+        //Saves the final result of the simulation
+        if(save_state == 1 || save_result == 1) {
+            save_model_state();
+        }
+        save_surfer();
+        cout << endl << "Simulation Complete" << endl;
 
-		delete[] color_field;
+        delete[] color_field;
         deallocate_memory();
         glutLeaveMainLoop();
-	}
-	glutPostRedisplay();
+    }
+    glutPostRedisplay();
 }
 
 
@@ -806,93 +798,93 @@ void mouse_move(int x, int y) {
  *Standard keyboard character control
  */
 void keyboard(unsigned char key, int x, int y) {
-	switch(key) {
-	case '-':
-		if(current_slice > 0) {
-			current_slice--;
-			//camera_trans[1]-=0.5;//For camera mouse control, above
-			//camera_trans[2]+=1.0;
-			glMatrixMode(GL_PROJECTION);
-			glLoadIdentity();
-			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+    switch(key) {
+    case '-':
+        if(current_slice > 0) {
+            current_slice--;
+            //camera_trans[1]-=0.5;//For camera mouse control, above
+            //camera_trans[2]+=1.0;
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            gluPerspective(60, 1.77777f, 1.0, 20000.0);
+            //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             if(num_rows > num_cols) {
-		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
             else {
                 gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
-		}
-		break;
-	case '+':
-		if(current_slice < num_slices-1) {
-			current_slice++;
-			//camera_trans[1]+=0.5;//For camera mouse control, above
-			//camera_trans[2]-=1.0;
-			glMatrixMode(GL_PROJECTION);
-			glLoadIdentity();
-			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+        }
+        break;
+    case '+':
+        if(current_slice < num_slices-1) {
+            current_slice++;
+            //camera_trans[1]+=0.5;//For camera mouse control, above
+            //camera_trans[2]-=1.0;
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            gluPerspective(60, 1.77777f, 1.0, 20000.0);
+            //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             if(num_rows > num_cols) {
-		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
             else {
                 gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
-		}
-		break;
-	case 'x':
-		exit(0);
-	default:
-		break;
-	}
-	display_helper();
+        }
+        break;
+    case 'x':
+        exit(0);
+    default:
+        break;
+    }
+    display_helper();
 }
 
 /*
  * Special keyboard control for arrows
  */
 void keyboardSpecial(int key, int x, int y) {
-	switch(key) {
-	case GLUT_KEY_UP:
-		if(current_slice > 0) {			
-			current_slice--;
-			//camera_trans[1]-=0.5;
-			//camera_trans[2]+=1.0;
-			glMatrixMode(GL_PROJECTION);
-			glLoadIdentity();
-			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+    switch(key) {
+    case GLUT_KEY_UP:
+        if(current_slice > 0) {            
+            current_slice--;
+            //camera_trans[1]-=0.5;
+            //camera_trans[2]+=1.0;
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            gluPerspective(60, 1.77777f, 1.0, 20000.0);
+            //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             if(num_rows > num_cols) {
-		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
             else {
                 gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
-		}
-		break;
+        }
+        break;
 
-	case GLUT_KEY_DOWN:
-		if(current_slice < num_slices-1) {
-			current_slice++;
-			//camera_trans[1]+=0.5;
-			//camera_trans[2]-=1.0;
-			glMatrixMode(GL_PROJECTION);
-			glLoadIdentity();
-			gluPerspective(60, 1.77777f, 1.0, 20000.0);
-			//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+    case GLUT_KEY_DOWN:
+        if(current_slice < num_slices-1) {
+            current_slice++;
+            //camera_trans[1]+=0.5;
+            //camera_trans[2]-=1.0;
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            gluPerspective(60, 1.77777f, 1.0, 20000.0);
+            //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             if(num_rows > num_cols) {
-		        gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
+                gluLookAt(num_cols/2.0,num_rows*0.1,num_rows+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
             else {
                 gluLookAt(num_cols/2.0,num_rows*0.1,num_cols+current_slice,num_cols/2.0,-num_rows/3.0,current_slice,0.0,1.0,0.0);
             }
-		}
-		break;
-	default:
-		break;
-	}
-	display_helper();
+        }
+        break;
+    default:
+        break;
+    }
+    display_helper();
 }
 #endif
 
@@ -900,8 +892,8 @@ void keyboardSpecial(int key, int x, int y) {
  * Clears the cin buffer
  */
 void clear_cin() {
-	cin.clear();
-	cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
+    cin.clear();
+    cin.ignore(numeric_limits <streamsize> ::max(), '\n' );
 }
 
 /*
@@ -931,7 +923,8 @@ void swap_temp_array() {
 void load_file() {
     ifstream source_file;       //Input file stream
     string temp_str;
-    ostringstream str_conv;
+    stringstream stringBuffer;
+    REAL min_dim;
     
     //Ask for the input file names and displays an error message
     //if the file does not exist
@@ -947,7 +940,7 @@ void load_file() {
     //Asks the user if the state of the model should be saved every screen update
     cout << endl << "To save the state of the model every screen update enter 1, otherwise 0: ";
     while(!(cin >> save_state) || save_state < 0 || save_state > 1) {
-		clear_cin();
+        clear_cin();
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
     }
 
@@ -955,7 +948,7 @@ void load_file() {
         //Asks the user if the final result of the model should be saved
         cout << endl << "To save the final result of the model enter 1, otherwise 0: ";
         while(!(cin >> save_result) || save_result < 0 || save_result > 1) {
-			clear_cin();
+            clear_cin();
             cout << "Incorrect input, to save the final result of the model enter 1, else 0: ";
         }
     }
@@ -969,11 +962,11 @@ void load_file() {
     //Asks for the DSAA surfer grid filenmae
     cout << "Surfer filename: ";
     while(!(cin >> output_su_filename) || output_su_filename.length() < 5) {
-		clear_cin();
-		cout << "Please enter a filename at least 5 characters in length: ";
-	}
-
+        clear_cin();
+        cout << "Please enter a filename at least 5 characters in length: ";
+    }
     
+    clear_cin();
     //Loads the input file
     cout << endl << endl << "Loading Input File";
     
@@ -998,111 +991,19 @@ void load_file() {
     cout << "Model time elapsed = " << initial_time << " Years" << endl << endl;
     
     //Calculates the number of characters for the surfer file index
-    str_conv << num_slices;
-    su_num_width = str_conv.str().length();
+    stringBuffer.str("");
+    stringBuffer.clear();
+    stringBuffer << num_slices;
+    su_num_width = stringBuffer.str().length();
     
-    //Allocates memory for the conduction variables based on the previously read in simulation
-    //parameters
+    //Allocates memory for cell dimensions and distances
     dim_x = new REAL[num_cols];
     dim_y = new REAL[num_rows];
     dim_z = new REAL[num_slices];
     dist_x = new REAL[num_cols];
     dist_y = new REAL[num_rows];
     dist_z = new REAL[num_slices];
-    temp = new REAL**[num_rows];
-    next_temp = new REAL**[num_rows];
-    cond_codes = new int**[num_rows];
-    cond_hp_index = new int**[num_rows];
-    cond_tc_index = new int**[num_rows];
-    use_cond = new int**[num_rows];
-    for(int i = 0; i < num_rows; i++) {
-        temp[i] = new REAL*[num_cols];
-        next_temp[i] = new REAL*[num_cols];
-        cond_codes[i] = new int*[num_cols];
-        cond_hp_index[i] = new int*[num_cols];
-        cond_tc_index[i] = new int*[num_cols];
-        use_cond[i] = new int*[num_cols];
-        for (int j = 0; j < num_cols; j++) {
-            temp[i][j] = new REAL[num_slices];
-            next_temp[i][j] = new REAL[num_slices];
-            cond_codes[i][j] = new int[num_slices];
-            cond_hp_index[i][j] = new int[num_slices];
-            cond_tc_index[i][j] = new int[num_slices];
-            use_cond[i][j] = new int[num_slices];
-        }
-    }
-    //Reads in the starting temperatures of the simulation from the input file
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-                source_file >> temp[i][j][k];
-            }
-        }
-    }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
-
-    //Reads in the conduction codes for each cell of the simulation and parses
-    //the array indexs from the codes
-    //Unlike, the Fortran version of the program, the conduction direction codes
-    //are ignored since the simulation accounts for them internally
-    for (int k = 0; k < num_slices; k++) {
-        for(int i = 0; i < num_rows; i++) {
-            for(int j = 0; j < num_cols; j++) {
-                source_file >> temp_str;
-                cond_codes[i][j][k] = atoi(temp_str.c_str());
-                cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
-            }
-        }
-    }
-    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
-
-    //If convection is used for the user specified input file, memory is allocated for its
-    //variables and they are read in from the input file
-    if(using_convection) {     
-        //Allocates memory for the convection variables based on the previously read in simulation
-        //parameters
-        conv_codes = new int**[num_rows];
-        conv_min_temp_index = new int**[num_rows];
-        conv_direction = new int**[num_rows];
-        conv_vel_index = new int**[num_rows];
-        conv_fluid_index = new int**[num_rows];
-        conv_rock_index = new int**[num_rows];
-        for(int i = 0; i < num_rows; i++) {
-            conv_codes[i] = new int*[num_cols];
-            conv_min_temp_index[i] = new int*[num_cols];
-            conv_direction[i] = new int*[num_cols];
-            conv_vel_index[i] = new int*[num_cols];
-            conv_fluid_index[i] = new int*[num_cols];
-            conv_rock_index[i] = new int*[num_cols];
-            for (int j = 0; j < num_cols; j++) {
-                conv_codes[i][j] = new int[num_slices];
-                conv_min_temp_index[i][j] = new int[num_slices];
-                conv_direction[i][j] = new int[num_slices];
-                conv_vel_index[i][j] = new int[num_slices];
-                conv_fluid_index[i][j] = new int[num_slices];
-                conv_rock_index[i][j] = new int[num_slices];
-            }
-        }
-        
-        //Reads in the convection codes for each cell of the simulation and parses the array
-        //indexs from the ocdes
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    source_file >> temp_str;
-                    conv_codes[i][j][k] = atoi(temp_str.c_str());
-                    conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
-                    conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
-                }
-            }
-        }
-        cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
-    }
+    
     //Reads in the Y (column) dimensions and finds the minimum column distance
     for(int i = 0; i < num_cols; i++) {
         source_file >> dim_x[i];
@@ -1184,6 +1085,16 @@ void load_file() {
         cout << "  " << thermal_conduct_diff[i];
     }
 
+    //Calculates the maximum time step of the simulation
+    min_dim = min_row_dim;
+    if(min_col_dim < min_dim) {
+        min_dim = min_col_dim;
+    }
+    if(num_slices > 1 && min_slice_dim < min_dim) {
+        min_dim = min_slice_dim;
+    }
+    time_step = min_dim*min_dim/(5*max_thermal_conduct_diff);
+    
     //Reads in the convection specific variables if convection
     //is used by the user specified input file
     if(using_convection) {
@@ -1205,7 +1116,6 @@ void load_file() {
         source_file >> num_mtc;
         min_temp_conv = new REAL[num_mtc];
         for(int i = 0; i < num_mtc; i++) {
-            
             source_file >> min_temp_conv[i];
         }
         //Reads in the convection velocities
@@ -1226,32 +1136,168 @@ void load_file() {
             cout << " " << vel[i];
         }
         cout << endl;
+        
+        /*
+        T1 = max_thermal_conduct_diff;
+        T2 = min_col_dim;
+        T3 = min_row_dim;
+        */
+        //Finds the convection time increment
+        tic = min_dim/max_vel;
+    }
+
+    //Allocates memory for the conduction variables based on the previously read in simulation
+    //parameters
+    temp = new REAL**[num_rows];
+    next_temp = new REAL**[num_rows];
+    cond_codes = new int**[num_rows];
+    cond_hp_index = new int**[num_rows];
+    cond_tc_index = new int**[num_rows];
+    use_cond = new int**[num_rows];
+    for(int i = 0; i < num_rows; i++) {
+        temp[i] = new REAL*[num_cols];
+        next_temp[i] = new REAL*[num_cols];
+        cond_codes[i] = new int*[num_cols];
+        cond_hp_index[i] = new int*[num_cols];
+        cond_tc_index[i] = new int*[num_cols];
+        use_cond[i] = new int*[num_cols];
+        for (int j = 0; j < num_cols; j++) {
+            temp[i][j] = new REAL[num_slices];
+            next_temp[i][j] = new REAL[num_slices];
+            cond_codes[i][j] = new int[num_slices];
+            cond_hp_index[i][j] = new int[num_slices];
+            cond_tc_index[i][j] = new int[num_slices];
+            use_cond[i][j] = new int[num_slices];
+        }
+    }
+    //Reads in the starting temperatures of the simulation from the input file
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                source_file >> temp[i][j][k];
+            }
+        }
+    }
+    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " temps" << endl;
+
+    //Reads in the conduction codes for each cell of the simulation and parses
+    //the array indexs from the codes
+    //Unlike, the Fortran version of the program, the conduction direction codes
+    //are ignored since the simulation accounts for them internally
+    for (int k = 0; k < num_slices; k++) {
+        for(int i = 0; i < num_rows; i++) {
+            for(int j = 0; j < num_cols; j++) {
+                source_file >> temp_str;
+                if(temp_str.size() != 2*INDEX_WIDTH+1) {
+                    cerr << "Incorrect Conduction code found at: " << i << "," << j << "," << k << endl;
+                    cerr << "Code has character length of " << temp_str.size() << " instead of " << 2*INDEX_WIDTH+1 << endl;
+                    PressEnterToContinue();
+                    exit(1);
+                }
+                cond_codes[i][j][k] = atoi(temp_str.c_str());
+                cond_tc_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                if(cond_tc_index[i][j][k] < 0 || cond_tc_index[i][j][k] >= num_tcd) {
+                    cerr << "Incorrect Thermal Conductivity Diff. Index found at: " << i << "," << j << "," << k << endl;
+                    PressEnterToContinue();
+                    exit(1);
+                }
+                cond_hp_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                if(cond_hp_index[i][j][k] < 0 || cond_hp_index[i][j][k] >= num_hp) {
+                    cerr << "Incorrect Heat Production Value Index found at: " << i << "," << j << "," << k << endl;
+                    PressEnterToContinue();
+                    exit(1);
+                }
+                use_cond[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,1).c_str());
+                if(use_cond[i][j][k] < 0 || use_cond[i][j][k] > 1) {
+                    cerr << "Incorrect Conduction Enable flag found at: " << i << "," << j << "," << k << endl;
+                    PressEnterToContinue();
+                    exit(1);
+                }
+            }
+        }
+    }
+    cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " conduction codes" << endl;
+
+    //If convection is used for the user specified input file, memory is allocated for its
+    //variables and they are read in from the input file
+    if(using_convection) {     
+        //Allocates memory for the convection variables based on the previously read in simulation
+        //parameters
+        conv_codes = new int**[num_rows];
+        conv_min_temp_index = new int**[num_rows];
+        conv_direction = new int**[num_rows];
+        conv_vel_index = new int**[num_rows];
+        conv_fluid_index = new int**[num_rows];
+        conv_rock_index = new int**[num_rows];
+        for(int i = 0; i < num_rows; i++) {
+            conv_codes[i] = new int*[num_cols];
+            conv_min_temp_index[i] = new int*[num_cols];
+            conv_direction[i] = new int*[num_cols];
+            conv_vel_index[i] = new int*[num_cols];
+            conv_fluid_index[i] = new int*[num_cols];
+            conv_rock_index[i] = new int*[num_cols];
+            for (int j = 0; j < num_cols; j++) {
+                conv_codes[i][j] = new int[num_slices];
+                conv_min_temp_index[i][j] = new int[num_slices];
+                conv_direction[i][j] = new int[num_slices];
+                conv_vel_index[i][j] = new int[num_slices];
+                conv_fluid_index[i][j] = new int[num_slices];
+                conv_rock_index[i][j] = new int[num_slices];
+            }
+        }
+        
+        //Reads in the convection codes for each cell of the simulation and parses the array
+        //indexs from the ocdes
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 0; i < num_rows; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    source_file >> temp_str;
+                    if(temp_str.size() != 5*INDEX_WIDTH) {
+                        cerr << "Incorrect Convection code found at: " << i << "," << j << "," << k << endl;
+                        cerr << "Code has character length of " << temp_str.size() << " instead of " << 5*INDEX_WIDTH << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                    conv_codes[i][j][k] = atoi(temp_str.c_str());
+                    conv_min_temp_index[i][j][k] = atoi(temp_str.substr(0*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    if(conv_min_temp_index[i][j][k] < 0 || conv_min_temp_index[i][j][k] >= num_mtc) {
+                        cerr << "Incorrect Minimum Convection Temp Index found at: " << i << "," << j << "," << k << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                    conv_vel_index[i][j][k] = atoi(temp_str.substr(1*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    if(conv_vel_index[i][j][k] < 0 || conv_vel_index[i][j][k] > num_vel) {
+                        cerr << "Incorrect Convection Velocity Index found at: " << i << "," << j << "," << k << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                    conv_fluid_index[i][j][k] = atoi(temp_str.substr(2*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    if(conv_fluid_index[i][j][k] < 0 || conv_fluid_index[i][j][k] > num_hcf) {
+                        cerr << "Incorrect Fluid Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                    conv_rock_index[i][j][k] = atoi(temp_str.substr(3*INDEX_WIDTH,INDEX_WIDTH).c_str())-1;
+                    if(conv_rock_index[i][j][k] < 0 || conv_rock_index[i][j][k] > num_vel) {
+                        cerr << "Incorrect Rock Heat Capacity Index found at: " << i << "," << j << "," << k << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                    conv_direction[i][j][k] = atoi(temp_str.substr(4*INDEX_WIDTH,2).c_str());
+                    if(conv_direction[i][j][k] < 1 || conv_vel_index[i][j][k] > 27) {
+                        cerr << "Incorrect Convection Direction found at: " << i << "," << j << "," << k << endl;
+                        PressEnterToContinue();
+                        exit(1);
+                    }
+                }
+            }
+        }
+        cout << "Read " << num_rows << " X " << num_cols << " X " << num_slices << " convection codes" << endl;
     }
     
     //Closes the input file
     source_file.close();
     
-    /*
-    T1 = max_thermal_conduct_diff;
-    T2 = min_col_dim;
-    T3 = min_row_dim;
-    */
-    //Finds the convection time increment
-    if(using_convection) {
-        if(min_col_dim > min_row_dim) {
-            tic = min_row_dim/max_vel;
-        }
-        else {
-            tic = min_col_dim/max_vel;
-        }
-    }
-    //Calculates the maximum time step of the simulation
-    if(min_col_dim < min_row_dim) {
-        time_step = min_col_dim*min_col_dim/(5*max_thermal_conduct_diff);
-    }
-    else {
-        time_step = min_row_dim*min_row_dim/(5*max_thermal_conduct_diff);
-    }
     cout << endl << "Done Loading Input File" << endl;
 }
 
@@ -1273,44 +1319,8 @@ void save_model_state() {
         output_file << setw(20) << num_rows << " " << setw(20) << num_cols << " " << setw(20) << num_slices << setw(20) << using_convection << endl;
         output_file << setw(20) << fixed << setprecision(OUT_PRECISION) << chf*1000.0 << " " << setw(20) << initial_time + sim_time << endl;
         output_file << title << endl;
-        
-        output_file << setprecision(OUT_PRECISION);
-        //Prints the current temperature array of the simulation
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << setw(OUT_PRECISION+5) << temp[i][j][k];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
-        }
-        
-        //Prints the conduction codes of the simulation to the output file
-        output_file << setfill('0');
-        for (int k = 0; k < num_slices; k++) {
-            for(int i = 0; i < num_rows; i++) {
-                for(int j = 0; j < num_cols; j++) {
-                    output_file << " " << setw(2*INDEX_WIDTH+1) << cond_codes[i][j][k];
-                }
-                output_file << endl;
-            }
-            output_file << endl;
-        }
-        
-        //Prints the convection codes to the output file if convection is being used
-        if(using_convection) {
-            for (int k = 0; k < num_slices; k++) {
-                for(int i = 0; i < num_rows; i++) {
-                    for(int j = 0; j < num_cols; j++) {
-                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i][j][k];
-                    }
-                    output_file << endl;
-                }
-                output_file << endl;
-            }
-        }
-        
+
+
         output_file << setfill(' ');
         output_file << setprecision(3);
         //Prints the column (X) dimensions of the simulation to the output file
@@ -1375,6 +1385,44 @@ void save_model_state() {
                 output_file << " " << vel[i];
             }
             output_file << endl;
+        }
+        
+        output_file << setprecision(OUT_PRECISION) << fixed;
+        output_file << endl;
+        //Prints the current temperature array of the simulation
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 0; i < num_rows; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    output_file << " " << setw(OUT_PRECISION+5) << temp[i][j][k];
+                }
+                output_file << endl;
+            }
+            output_file << endl;
+        }
+        
+        //Prints the conduction codes of the simulation to the output file
+        output_file << setfill('0');
+        for (int k = 0; k < num_slices; k++) {
+            for(int i = 0; i < num_rows; i++) {
+                for(int j = 0; j < num_cols; j++) {
+                    output_file << " " << setw(2*INDEX_WIDTH+1) << cond_codes[i][j][k];
+                }
+                output_file << endl;
+            }
+            output_file << endl;
+        }
+        
+        //Prints the convection codes to the output file if convection is being used
+        if(using_convection) {
+            for (int k = 0; k < num_slices; k++) {
+                for(int i = 0; i < num_rows; i++) {
+                    for(int j = 0; j < num_cols; j++) {
+                        output_file << " " << setw(4*INDEX_WIDTH+2) << conv_codes[i][j][k];
+                    }
+                    output_file << endl;
+                }
+                output_file << endl;
+            }
         }
         
         //Closes the output file
@@ -1788,48 +1836,48 @@ REAL find_max_temp_diff() {
  * stores them in the index array
  */
 void find_loc_index(REAL x_loc, REAL y_loc, REAL z_loc, int *index){
-	if(x_loc < 0) {
-		index[0] = -1;
-	}
-	else if(x_loc > max_dist_x) {
-		index[0] = num_cols;
-	}
-	else {
-		for(index[0] = 0; index[0] < num_cols; index[0]++) {
-			if(x_loc <= dist_x[index[0]]+dim_x[index[0]]/2.0) {
-				break;
-			}
-		}
-	}
+    if(x_loc < 0) {
+        index[0] = -1;
+    }
+    else if(x_loc > max_dist_x) {
+        index[0] = num_cols;
+    }
+    else {
+        for(index[0] = 0; index[0] < num_cols; index[0]++) {
+            if(x_loc <= dist_x[index[0]]+dim_x[index[0]]/2.0) {
+                break;
+            }
+        }
+    }
 
-	if(y_loc < 0) {
-		index[1] = -1;
-	}
-	else if(y_loc > max_dist_y) {
-		index[1] = num_rows;
-	}
-	else {
-		for(index[1] = 0; index[1] < num_rows; index[1]++) {
-			if(y_loc <= dist_y[index[1]]+dim_y[index[1]]/2.0) {
-				break;
-			}
-		}
-	}
+    if(y_loc < 0) {
+        index[1] = -1;
+    }
+    else if(y_loc > max_dist_y) {
+        index[1] = num_rows;
+    }
+    else {
+        for(index[1] = 0; index[1] < num_rows; index[1]++) {
+            if(y_loc <= dist_y[index[1]]+dim_y[index[1]]/2.0) {
+                break;
+            }
+        }
+    }
 
-	if(z_loc < 0) {
-		index[2] = -1;
-	}
-	else if(z_loc > max_dist_z) {
-		index[2] = num_slices;
-	}
-	else {
-		for(index[2] = 0; index[2] < num_slices; index[2]++) {
-			if(z_loc <= dist_x[index[2]]+dim_x[index[2]]/2.0) {
-				break;
-			}
-		}
-	}
-	
+    if(z_loc < 0) {
+        index[2] = -1;
+    }
+    else if(z_loc > max_dist_z) {
+        index[2] = num_slices;
+    }
+    else {
+        for(index[2] = 0; index[2] < num_slices; index[2]++) {
+            if(z_loc <= dist_x[index[2]]+dim_x[index[2]]/2.0) {
+                break;
+            }
+        }
+    }
+    
 }
 
 
@@ -1887,14 +1935,14 @@ int main(int argc, char **argv) {
 
 #ifdef DISPLAY
     cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
-	//Asks the user if they wish to visualize results
+    //Asks the user if they wish to visualize results
     cout << endl << "Press 1 to run visualization, otherwise 0: ";
     while(!(cin >> display_mode) || display_mode < 0 || display_mode > 1) {
-		clear_cin();
+        clear_cin();
         cout << "Incorrect input, to save the state of the model enter 1, else 0: ";
     }
 #else
-	cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
+    cout << "\t\t Finite Difference Heat Flow Simulation" << endl;
 #endif
     int input_val;    //Temporary int value
     REAL temp_val;    //Temporary REAL value
@@ -1910,7 +1958,7 @@ int main(int argc, char **argv) {
      */
     cout << endl << endl << "To Change the Temp. on a Block, Enter 1, Else 0: ";
     while(!(cin >> input_val) || input_val < 0 || input_val > 1) {
-		clear_cin();
+        clear_cin();
         cout << "Incorrect Input, Enter 1 to Change, Else 0: ";
     }
     
@@ -1921,20 +1969,20 @@ int main(int argc, char **argv) {
         cout << "Enter the Number of Blocks to Change: ";
         while(!(cin >> num_block) || num_block < 0) {
             clear_cin();
-			cout << "Enter a number greater than or equal to 0: ";
-		}
+            cout << "Enter a number greater than or equal to 0: ";
+        }
         for(int i = 0; i < num_block; i++) {
             cout << endl << "Block " << i << endl;
             cout << "Enter the Coordinates of the Upper Left Corner <row> <column> <slice>: ";
-			while(!(cin >> row1 >> col1 >> slice1) || row1 < 0 || col1 < 0 || slice1 < 0) {
+            while(!(cin >> row1 >> col1 >> slice1) || row1 < 0 || col1 < 0 || slice1 < 0) {
                 clear_cin();
-				cout << "Incorrect input, enter three positive numbers with spaces: ";
-			}
+                cout << "Incorrect input, enter three positive numbers with spaces: ";
+            }
             cout << "Enter the Coordinates of the Lower Right Corner <row> <column> <slice>: ";
             while(!(cin >> row2 >> col2 >> slice2) || row2 < row1 || col2 < col1 || slice2 < slice1) {
                 clear_cin();
-				cout << "Incorrect input, enter three positive numbers with spaces: ";
-			}
+                cout << "Incorrect input, enter three positive numbers with spaces: ";
+            }
             cout << endl << "Current Block Temps" << endl;
             cout << setw(10) << "row" << " " << setw(10) << "col" << " " << setw(10) << "slice" << " " << setw(OUT_PRECISION+5) << "temp" << endl;
             cout << setw(10) << row1 << " " << setw(10) << col1 << " " << setw(10) << slice1 << setw(OUT_PRECISION+5) << fixed << setprecision(OUT_PRECISION) << temp[row1][col1][slice1] << endl;
@@ -2061,7 +2109,7 @@ int main(int argc, char **argv) {
     else if(num_conv_loops <= 0) {
         num_conv_loops = 1;
     }
-
+        
     //Calculates the time increment per convection loop
     time_inc = time_step/num_conv_loops;
     min_row_dim = 100.0;
@@ -2121,62 +2169,62 @@ int main(int argc, char **argv) {
     }
 
 #ifdef DISPLAY
-	if(display_mode == 1) {
-		array_minmax();
-		array_size = num_cols * num_rows;
-		color_field = new float[array_size * 3];
-		for (int i=0; i<array_size *3; i++) {
-			color_field[i] = 0.0;
-		}
+    if(display_mode == 1) {
+        array_minmax();
+        array_size = num_cols * num_rows;
+        color_field = new float[array_size * 3];
+        for (int i=0; i<array_size *3; i++) {
+            color_field[i] = 0.0;
+        }
 
-		glutInit(&argc, argv);
-		int windowWidth = glutGet(GLUT_SCREEN_WIDTH);
-		int windowHeight = glutGet(GLUT_SCREEN_HEIGHT);
+        glutInit(&argc, argv);
+        int windowWidth = glutGet(GLUT_SCREEN_WIDTH);
+        int windowHeight = glutGet(GLUT_SCREEN_HEIGHT);
 
-		glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
-		glutInitWindowSize(windowWidth, windowHeight);
-		glutInitWindowPosition(0, 0);
-		
-		glutCreateWindow("ARC Simulation");
+        glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
+        glutInitWindowSize(windowWidth, windowHeight);
+        glutInitWindowPosition(0, 0);
+        
+        glutCreateWindow("ARC Simulation");
 
-		glViewport(0, 0, windowWidth,windowHeight);
+        glViewport(0, 0, windowWidth,windowHeight);
 
-		glEnable (GL_BLEND);
-		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable (GL_BLEND);
+        glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-		glMatrixMode(GL_PROJECTION);
-		glLoadIdentity();
-		gluPerspective(60, 1.77777f, 1.0, 20000.0);
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        gluPerspective(60, 1.77777f, 1.0, 20000.0);
 
-		glutDisplayFunc(display3D);
-		
-		//glutMouseFunc(mouse_button);//Mouse motion and camera trans settings maintained for debugging
-		//glutMotionFunc(mouse_move);
-		glutKeyboardFunc(keyboard);
-		glutSpecialFunc(keyboardSpecial);
+        glutDisplayFunc(display3D);
+        
+        //glutMouseFunc(mouse_button);//Mouse motion and camera trans settings maintained for debugging
+        //glutMotionFunc(mouse_move);
+        glutKeyboardFunc(keyboard);
+        glutSpecialFunc(keyboardSpecial);
 
-		/*camera_trans[0] = -num_cols/2.0;
-		camera_trans[1] = num_rows/3.0;
-		camera_trans[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
-		camera_rot[0] = 28.0;
-		camera_trans_lag[0] = -num_cols/2.0;
-		camera_trans_lag[1] = num_rows/3.0;
-		camera_trans_lag[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
-		camera_rot_lag[0] = 28.0;
-		*/
+        /*camera_trans[0] = -num_cols/2.0;
+        camera_trans[1] = num_rows/3.0;
+        camera_trans[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
+        camera_rot[0] = 28.0;
+        camera_trans_lag[0] = -num_cols/2.0;
+        camera_trans_lag[1] = num_rows/3.0;
+        camera_trans_lag[2] = -num_rows*1.75*tan(28.0/180.0*M_PI);
+        camera_rot_lag[0] = 28.0;
+        */
 
-		//gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
+        //gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
         if(num_rows > num_cols) {
             gluLookAt(num_cols/2.0,num_rows*0.1,num_rows,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
         }
         else {
             gluLookAt(num_cols/2.0,num_rows*0.1,num_cols,num_cols/2.0,-num_rows/3.0,0.0,0.0,1.0,0.0);
         }
-		glutMainLoop();
+        glutMainLoop();
         clear_cin();
-		PressEnterToContinue();
-	}
-	else {
+        PressEnterToContinue();
+    }
+    else {
 #endif
         while(sim_time <= run_time) {
             //Displays status information for the current loop
@@ -2230,6 +2278,6 @@ int main(int argc, char **argv) {
         PressEnterToContinue();
         deallocate_memory();
 #ifdef DISPLAY
-	}
+    }
 #endif        
 }
